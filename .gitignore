@@ -1,0 +1,8 @@
+.env
+data/vectordb/
+data/documents/
+data/processed/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+evaluation/eval_results.json
