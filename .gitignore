@@ -40,6 +40,7 @@ logs/
 outputs/
 models/
 .notebook/
+files/
 
 # =========================
 # 4. OS & IDE (에디터 설정 파일)
