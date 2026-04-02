@@ -15,7 +15,6 @@ from configs.config import Config
 from src.rag_pipeline import RAGPipeline
 
 
-# ── 페이지 설정 ──────────────────────────────────────────────────
 st.set_page_config(
     page_title="입찰메이트 RFP 분석 AI",
     page_icon="📋",
@@ -26,7 +25,6 @@ st.title("📋 입찰메이트 RFP 분석 AI")
 st.caption("제안요청서(RFP)의 핵심 내용을 빠르게 파악하세요.")
 
 
-# ── 사이드바 ──────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ 설정")
 
@@ -66,37 +64,45 @@ with st.sidebar:
             st.session_state.example_query = ex
 
 
-# ── 파이프라인 초기화 ─────────────────────────────────────────────
-@st.cache_resource
-def init_pipeline(model_name, r_method, k, temp, reranker, multi_q):
-    config = Config(
+def _pipeline_signature() -> tuple:
+    """세션 내에서 파이프라인 재생성이 필요한 설정만 signature로 사용한다."""
+    return (
+        model,
+        retrieval_method,
+        top_k,
+        temperature,
+        use_reranker,
+        use_multi_query,
+    )
+
+
+def _build_config() -> Config:
+    return Config(
         scenario="B",
-        openai_chat_model=model_name,
+        openai_chat_model=model,
         metadata_csv="data/data_list.csv",
         vectordb_dir="data/vectordb",
-        retrieval_method=r_method,
-        retrieval_top_k=k,
-        temperature=temp,
-        use_reranker=reranker,
-        use_multi_query=multi_q,
+        retrieval_method=retrieval_method,
+        retrieval_top_k=top_k,
+        temperature=temperature,
+        use_reranker=use_reranker,
+        use_multi_query=use_multi_query,
     )
-    pipeline = RAGPipeline(config)
-    pipeline.initialize_vectorstore()
-    return pipeline
+
+
+if not os.getenv("OPENAI_API_KEY"):
+    st.error("OPENAI_API_KEY가 설정되지 않았습니다. `.env`를 확인해 주세요.")
+    st.stop()
 
 
 try:
-    pipeline = init_pipeline(
-        model, retrieval_method, top_k, temperature, use_reranker, use_multi_query
-    )
-    # 설정 변경 반영
-    pipeline.config.retrieval_method = retrieval_method
-    pipeline.config.retrieval_top_k = top_k
-    pipeline.config.openai_chat_model = model
-    pipeline.config.temperature = temperature
-    pipeline.config.use_reranker = use_reranker
-    pipeline.config.use_multi_query = use_multi_query
-    st.session_state.pipeline = pipeline
+    current_sig = _pipeline_signature()
+    if st.session_state.get("pipeline_signature") != current_sig:
+        pipeline = RAGPipeline(_build_config())
+        pipeline.initialize_vectorstore()
+        st.session_state.pipeline = pipeline
+        st.session_state.pipeline_signature = current_sig
+    pipeline = st.session_state.pipeline
 except Exception as e:
     st.error(
         f"벡터스토어를 로딩할 수 없습니다. 먼저 인덱싱을 실행하세요.\n\n"
@@ -105,11 +111,9 @@ except Exception as e:
     st.stop()
 
 
-# ── 대화 UI ───────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 이전 메시지 출력
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -125,22 +129,18 @@ for msg in st.session_state.messages:
         if msg.get("timing"):
             st.caption(msg["timing"])
 
-# 예시 버튼 처리
 if "example_query" in st.session_state:
     user_input = st.session_state.pop("example_query")
 else:
     user_input = st.chat_input("RFP에 대해 질문하세요...")
 
 if user_input:
-    # 사용자 메시지
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # AI 응답 생성
     with st.chat_message("assistant"):
         with st.spinner("문서를 검색하고 답변을 생성하는 중..."):
-            # 메타데이터 필터 추출 시도
             where_filter = pipeline.extract_metadata_filter(user_input)
             result = pipeline.query(
                 user_input,
@@ -165,9 +165,11 @@ if user_input:
         timing = f"⏱️ 총 응답 시간: {elapsed:.2f}s | 검색 문서: {len(result.get('retrieved_docs', []))}개"
         st.caption(timing)
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": result["answer"],
-        "sources": result.get("sources", []),
-        "timing": timing,
-    })
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": result["answer"],
+            "sources": result.get("sources", []),
+            "timing": timing,
+        }
+    )

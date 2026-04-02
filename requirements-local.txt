@@ -1,7 +1,10 @@
 # ============================================================
-# 전체 의존성 (GCP Linux 환경 기준 - Python 3.11/3.12 권장)
+# 로컬 개발 환경용 (Windows / Python 3.14)
 #
-# 로컬 Windows 개발 환경(Python 3.14)은 requirements-local.txt 사용:
+# ragas, FlagEmbedding, AutoRAG는 Windows에서 C++ 빌드 오류로
+# 제외함. GCP 환경에서는 requirements.txt를 사용하세요.
+#
+# 설치 방법:
 #   pip install -r requirements-local.txt
 # ============================================================
 
@@ -28,23 +31,16 @@ sentence-transformers>=3.0.0
 torch>=2.2.0
 accelerate>=0.20.1
 
-# ── Reranking (시나리오 A) - Windows에서는 설치 생략 ─────────────
-# ir-datasets 의존성(zlib-state)이 Windows에서 C++ 컴파일러를 요구함
-FlagEmbedding>=1.2.0; sys_platform != "win32"
-
 # ── Data Processing ───────────────────────────────────────────
 pandas>=2.2.0
 numpy>=1.26.0
 pyarrow>=16.0.0
 
-# ── Evaluation ────────────────────────────────────────────────
+# ── Evaluation (Windows 호환 버전) ────────────────────────────
 rouge-score>=0.1.2
 nltk>=3.9.0
 bert-score>=0.3.13
-
-# ragas: scikit-network 의존성이 Windows에서 C++ 컴파일러를 요구함
-# GCP(Linux)에서는 정상 설치됨
-ragas>=0.4.3; sys_platform != "win32"
+# ragas, FlagEmbedding → Windows 제외 (C++ 빌드 필요)
 
 # ── Streamlit App ─────────────────────────────────────────────
 streamlit>=1.30.0
@@ -57,7 +53,3 @@ uvicorn>=0.30.0
 jupyter>=1.0.0
 ipywidgets>=8.1.0
 tqdm>=4.66.0
-
-# ── AutoRAG (Python < 3.13, Linux 전용) ───────────────────────
-AutoRAG==0.3.21; python_version < "3.13" and sys_platform != "win32"
-langchain-community==0.2.19; python_version < "3.13" and sys_platform != "win32"

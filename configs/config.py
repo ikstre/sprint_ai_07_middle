@@ -26,6 +26,7 @@ class Config:
     openai_embedding_dim: int = 1536
 
     # ── 시나리오 A: HuggingFace 로컬 모델 설정 ─────────────────────
+    hf_token: str = field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
     hf_embedding_model: str = "intfloat/multilingual-e5-large"
     hf_chat_model: str = "google/gemma-3-4b-it"
     hf_embedding_dim: int = 1024

@@ -1,25 +1,24 @@
-# ── API 키 / 환경 변수 (절대 커밋 금지) ──
+# Secrets / local env
 .env
 .env.local
 .env.*.local
 
-# ── 데이터 (비밀유지조약 - 절대 커밋 금지) ──
+# Raw input data (do not commit)
 data/
-# data/.gitkeep은 허용 (폴더 구조만 유지)
 !data/.gitkeep
 
-# ── 벡터 DB / 인덱스 ──
+# Vector DB / indexes
 chroma_db/
 data/vectordb/
 
-# ── 평가 결과 ──
-evaluation/
+# Evaluation outputs (project-root only)
+/evaluation/
 
-# ── Python 캐시 ──
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 .ipynb_checkpoints/
 
-# ── 기타 ──
+# Logs
 *.log
