@@ -51,9 +51,14 @@ class EmbeddingModel:
         """단일 쿼리를 임베딩한다."""
         return self.embed_texts([query])[0]
 
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        """서로게이트 등 잘못된 유니코드를 제거한다."""
+        return text.encode("utf-8", errors="ignore").decode("utf-8")
+
     def _embed_openai(self, texts: list[str]) -> list[list[float]]:
         """OpenAI API를 사용하여 임베딩을 생성한다."""
-        texts = [t if t.strip() else " " for t in texts]
+        texts = [self._sanitize(t) if t.strip() else " " for t in texts]
 
         all_embeddings = []
         batch_size = 2048
