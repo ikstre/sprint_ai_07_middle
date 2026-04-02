@@ -16,6 +16,7 @@ venv/
 env/
 .venv/
 .env
+myenv/
 
 # =========================
 # 2. Jupyter Notebook 찌꺼기 파일
@@ -38,6 +39,7 @@ datasets/
 logs/
 outputs/
 models/
+.notebook/
 
 # =========================
 # 4. OS & IDE (에디터 설정 파일)
