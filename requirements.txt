@@ -61,6 +61,7 @@ jupyter>=1.0.0
 ipywidgets>=8.1.0
 tqdm>=4.66.0
 
-# ── AutoRAG (Python < 3.13 전용) ──────────────────────────────
-AutoRAG==0.3.21; python_version < "3.13"
-langchain-community==0.2.19; python_version < "3.13"
+# ── AutoRAG ───────────────────────────────────────────────────
+# AutoRAG는 openai<2.0.0 + langchain 0.2.x 생태계를 요구하여
+# 메인 스택(openai>=2.x)과 충돌함 → requirements-autorag.txt 별도 사용
+# GCP에서: pip install -r requirements-autorag.txt
