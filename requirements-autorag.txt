@@ -1,0 +1,24 @@
+# ============================================================
+# AutoRAG 전용 의존성 (GCP Linux, Python 3.11/3.12)
+#
+# AutoRAG는 openai 1.x + langchain 0.2.x 생태계를 요구하여
+# requirements.txt(openai 2.x)와 동일 환경에서 공존 불가.
+# 별도 conda 환경 또는 가상환경에서 단독으로 설치할 것.
+#
+# 설치:
+#   conda create -n autorag python=3.11
+#   conda activate autorag
+#   pip install -r requirements-autorag.txt
+# ============================================================
+
+# AutoRAG 및 호환 생태계
+AutoRAG==0.3.21
+langchain-community==0.2.19
+langchain-text-splitters>=0.2.0,<0.3.0
+openai>=1.40.0,<2.0.0
+
+# 기본 유틸리티
+pandas>=2.2.0
+numpy>=1.26.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0

@@ -1,11 +1,10 @@
 # ============================================================
-# 전체 의존성
+# 로컬 개발 환경용 (Windows / Python 3.14)
 #
-# 권장 환경: Python 3.11 (conda env AI_07_MIDDLE)
-#   conda activate AI_07_MIDDLE
-#   pip install -r requirements.txt
+# ragas, FlagEmbedding, AutoRAG는 Windows에서 C++ 빌드 오류로
+# 제외함. GCP 환경에서는 requirements.txt를 사용하세요.
 #
-# Python 3.14 Windows 환경에서는 requirements-local.txt 사용:
+# 설치 방법:
 #   pip install -r requirements-local.txt
 # ============================================================
 
@@ -32,22 +31,16 @@ sentence-transformers>=3.0.0
 torch>=2.2.0
 accelerate>=0.20.1
 
-# ── Reranking (시나리오 A) ─────────────────────────────────────
-# Python 3.14에서는 ir-datasets(zlib-state) C++ 빌드 실패 → 제외
-FlagEmbedding>=1.2.0; python_version < "3.14"
-
 # ── Data Processing ───────────────────────────────────────────
 pandas>=2.2.0
 numpy>=1.26.0
 pyarrow>=16.0.0
 
-# ── Evaluation ────────────────────────────────────────────────
+# ── Evaluation (Windows 호환 버전) ────────────────────────────
 rouge-score>=0.1.2
 nltk>=3.9.0
 bert-score>=0.3.13
-
-# Python 3.14에서는 scikit-network C++ 빌드 실패 → 제외
-ragas>=0.4.3; python_version < "3.14"
+# ragas, FlagEmbedding → Windows 제외 (C++ 빌드 필요)
 
 # ── Streamlit App ─────────────────────────────────────────────
 streamlit>=1.30.0
@@ -60,8 +53,3 @@ uvicorn>=0.30.0
 jupyter>=1.0.0
 ipywidgets>=8.1.0
 tqdm>=4.66.0
-
-# ── AutoRAG ───────────────────────────────────────────────────
-# AutoRAG는 openai<2.0.0 + langchain 0.2.x 생태계를 요구하여
-# 메인 스택(openai>=2.x)과 충돌함 → requirements-autorag.txt 별도 사용
-# GCP에서: pip install -r requirements-autorag.txt
