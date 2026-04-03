@@ -1,24 +1,8 @@
-# Secrets / local env
 .env
-.env.local
-.env.*.local
-
-# Raw input data (do not commit)
-data/
-!data/.gitkeep
-
-# Vector DB / indexes
-chroma_db/
 data/vectordb/
-
-# Evaluation outputs (project-root only)
-/evaluation/
-
-# Python cache
+data/documents/
+data/processed/
 __pycache__/
 *.pyc
-*.pyo
 .ipynb_checkpoints/
-
-# Logs
-*.log
+evaluation/eval_results.json

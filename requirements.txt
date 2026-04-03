@@ -1,67 +1,40 @@
-# ============================================================
-# 전체 의존성
-#
-# 권장 환경: Python 3.11 (conda env AI_07_MIDDLE)
-#   conda activate AI_07_MIDDLE
-#   pip install -r requirements.txt
-#
-# Python 3.14 Windows 환경에서는 requirements-local.txt 사용:
-#   pip install -r requirements-local.txt
-# ============================================================
+# ── Core ──
+openai>=1.30.0
+langchain>=0.3.0
+langchain-openai>=0.3.0
+langchain-community>=0.3.0
+langchain-text-splitters>=0.3.0
 
-# ── Core ──────────────────────────────────────────────────────
-openai>=2.30.0
-python-dotenv>=1.0.0
-
-# ── LangChain ─────────────────────────────────────────────────
-langchain-text-splitters>=1.1.1
-
-# ── Document Parsing ──────────────────────────────────────────
+# ── Document Parsing ──
 pypdf>=4.0.0
 pdfplumber>=0.11.0
 olefile>=0.47
-python-docx>=1.0.0
+pyhwp>=0.6.1
+python-hwp>=0.1.0
 
-# ── Embedding & Vector DB ─────────────────────────────────────
+# ── Embedding & Vector DB ──
 chromadb>=0.5.0
 faiss-cpu>=1.8.0
 
-# ── HuggingFace (시나리오 A) ───────────────────────────────────
+# ── HuggingFace (시나리오 A) ──
 transformers>=4.45.0
 sentence-transformers>=3.0.0
 torch>=2.2.0
-accelerate>=0.20.1
 
-# ── Reranking (시나리오 A) ─────────────────────────────────────
-# Python 3.14에서는 ir-datasets(zlib-state) C++ 빌드 실패 → 제외
-FlagEmbedding>=1.2.0; python_version < "3.14"
+# ── Reranking ──
+FlagEmbedding>=1.2.0
 
-# ── Data Processing ───────────────────────────────────────────
+# ── Data Processing ──
 pandas>=2.2.0
 numpy>=1.26.0
-pyarrow>=16.0.0
 
-# ── Evaluation ────────────────────────────────────────────────
+# ── Evaluation ──
+ragas>=0.2.0
 rouge-score>=0.1.2
 nltk>=3.9.0
-bert-score>=0.3.13
 
-# Python 3.14에서는 scikit-network C++ 빌드 실패 → 제외
-ragas>=0.4.3; python_version < "3.14"
-
-# ── Streamlit App ─────────────────────────────────────────────
-streamlit>=1.30.0
-
-# ── API Serving ───────────────────────────────────────────────
-fastapi>=0.115.0
-uvicorn>=0.30.0
-
-# ── Notebook & Utils ──────────────────────────────────────────
+# ── Notebook & Utils ──
 jupyter>=1.0.0
 ipywidgets>=8.1.0
 tqdm>=4.66.0
-
-# ── AutoRAG ───────────────────────────────────────────────────
-# AutoRAG는 openai<2.0.0 + langchain 0.2.x 생태계를 요구하여
-# 메인 스택(openai>=2.x)과 충돌함 → requirements-autorag.txt 별도 사용
-# GCP에서: pip install -r requirements-autorag.txt
+python-dotenv>=1.0.0
