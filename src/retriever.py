@@ -172,14 +172,19 @@ class Retriever:
 
 재구성된 질문들:"""
 
-        response = llm_client.chat.completions.create(
+        kwargs = dict(
             model=self.config.openai_chat_model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=300,
+            max_completion_tokens=300,
         )
+        # gpt-5 계열은 temperature 미지원
+        if not self.config.openai_chat_model.startswith("gpt-5"):
+            kwargs["temperature"] = 0.7
 
-        lines = response.choices[0].message.content.strip().split("\n")
+        response = llm_client.chat.completions.create(**kwargs)
+
+        content = response.choices[0].message.content or ""
+        lines = content.strip().split("\n")
         return [line.strip() for line in lines if line.strip()][:3]
 
     def rerank(self, query: str, results: list[dict], top_k: Optional[int] = None) -> list[dict]:

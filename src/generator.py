@@ -209,7 +209,24 @@ class RAGGenerator:
                 "total_tokens": getattr(response.usage, "total_tokens", None),
             }
 
-        return response.choices[0].message.content, usage
+        message = response.choices[0].message
+        content = message.content
+
+        # gpt-5 계열: content가 list[{"type":"text","text":"..."}] 형태로 올 수 있음
+        if isinstance(content, list):
+            content = "".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content
+            )
+
+        if not content:
+            content = (
+                getattr(message, "output_text", None)
+                or getattr(message, "refusal", None)
+                or ""
+            )
+
+        return content, usage
 
     def _call_hf(self, pipeline, user_prompt: str) -> tuple[str, dict | None]:
         full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
