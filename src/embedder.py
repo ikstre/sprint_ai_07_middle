@@ -61,7 +61,7 @@ class EmbeddingModel:
         texts = [self._sanitize(t) if t.strip() else " " for t in texts]
 
         all_embeddings = []
-        batch_size = 2048
+        batch_size = 100  # OpenAI 300,000 토큰/요청 한도 대응 (청크당 ~200토큰 기준)
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             response = self._client.embeddings.create(

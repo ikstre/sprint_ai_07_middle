@@ -28,6 +28,12 @@ st.caption("제안요청서(RFP)의 핵심 내용을 빠르게 파악하세요."
 with st.sidebar:
     st.header("⚙️ 설정")
 
+    collection = st.selectbox(
+        "컬렉션 (청크 크기)",
+        ["rfp_chunk1200", "rfp_chunk800", "rfp_documents"],
+        index=0,
+        help="인덱싱 시 사용한 청크 크기별 컬렉션을 선택합니다.",
+    )
     model = st.selectbox(
         "LLM 모델",
         ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
@@ -67,6 +73,7 @@ with st.sidebar:
 def _pipeline_signature() -> tuple:
     """세션 내에서 파이프라인 재생성이 필요한 설정만 signature로 사용한다."""
     return (
+        collection,
         model,
         retrieval_method,
         top_k,
@@ -99,7 +106,7 @@ try:
     current_sig = _pipeline_signature()
     if st.session_state.get("pipeline_signature") != current_sig:
         pipeline = RAGPipeline(_build_config())
-        pipeline.initialize_vectorstore()
+        pipeline.initialize_vectorstore(collection_name=collection)
         st.session_state.pipeline = pipeline
         st.session_state.pipeline_signature = current_sig
     pipeline = st.session_state.pipeline

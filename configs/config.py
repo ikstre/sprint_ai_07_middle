@@ -33,7 +33,7 @@ class Config:
     device: str = "cuda"  # GCP VM에서는 cuda 사용
 
     # ── 청킹 설정 ──────────────────────────────────────────────────
-    chunk_size: int = 800
+    chunk_size: int = 1200
     chunk_overlap: int = 200
     chunking_method: Literal["naive", "semantic"] = "naive"
 
