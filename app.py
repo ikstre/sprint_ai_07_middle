@@ -28,24 +28,44 @@ st.caption("제안요청서(RFP)의 핵심 내용을 빠르게 파악하세요."
 with st.sidebar:
     st.header("⚙️ 설정")
 
+    scenario = st.radio(
+        "실행 모드",
+        ["B: OpenAI API", "A: 로컬 HuggingFace"],
+        index=0,
+        horizontal=True,
+    )
+    scenario_key = scenario.split(":")[0].strip()  # "A" or "B"
+
+    st.divider()
+
     collection = st.selectbox(
         "컬렉션 (청크 크기)",
         ["rfp_chunk1200", "rfp_chunk800", "rfp_documents"],
         index=0,
         help="인덱싱 시 사용한 청크 크기별 컬렉션을 선택합니다.",
     )
-    model = st.selectbox(
-        "LLM 모델",
-        ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
-        index=0,
-    )
+
+    if scenario_key == "B":
+        model = st.selectbox(
+            "LLM 모델",
+            ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
+            index=0,
+        )
+        temperature = 0.1   # gpt-5 미지원, 내부적으로만 유지
+    else:
+        model = st.selectbox(
+            "LLM 모델",
+            ["google/gemma-3-4b-it"],
+            index=0,
+        )
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
+
     retrieval_method = st.selectbox(
         "검색 방식",
         ["similarity", "mmr", "hybrid"],
         index=0,
     )
     top_k = st.slider("Top-K (검색 결과 수)", 3, 15, 5)
-    temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
     use_reranker = st.checkbox("Re-ranking 사용", value=False)
     use_multi_query = st.checkbox("Multi-Query 사용", value=False)
 
@@ -73,6 +93,7 @@ with st.sidebar:
 def _pipeline_signature() -> tuple:
     """세션 내에서 파이프라인 재생성이 필요한 설정만 signature로 사용한다."""
     return (
+        scenario_key,
         collection,
         model,
         retrieval_method,
@@ -84,9 +105,8 @@ def _pipeline_signature() -> tuple:
 
 
 def _build_config() -> Config:
-    return Config(
-        scenario="B",
-        openai_chat_model=model,
+    base = dict(
+        scenario=scenario_key,
         metadata_csv="data/data_list.csv",
         vectordb_dir="data/vectordb",
         retrieval_method=retrieval_method,
@@ -95,10 +115,18 @@ def _build_config() -> Config:
         use_reranker=use_reranker,
         use_multi_query=use_multi_query,
     )
+    if scenario_key == "B":
+        base["openai_chat_model"] = model
+    else:
+        base["hf_chat_model"] = model
+    return Config(**base)
 
 
-if not os.getenv("OPENAI_API_KEY"):
+if scenario_key == "B" and not os.getenv("OPENAI_API_KEY"):
     st.error("OPENAI_API_KEY가 설정되지 않았습니다. `.env`를 확인해 주세요.")
+    st.stop()
+if scenario_key == "A" and not os.getenv("HF_TOKEN"):
+    st.error("HF_TOKEN이 설정되지 않았습니다. `.env`를 확인해 주세요.")
     st.stop()
 
 

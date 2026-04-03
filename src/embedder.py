@@ -11,6 +11,11 @@ import numpy as np
 from configs.config import Config
 
 
+def _sanitize(text: str) -> str:
+    """서로게이트 등 잘못된 유니코드를 제거한다."""
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 class EmbeddingModel:
     """임베딩 모델 래퍼"""
 
@@ -51,14 +56,9 @@ class EmbeddingModel:
         """단일 쿼리를 임베딩한다."""
         return self.embed_texts([query])[0]
 
-    @staticmethod
-    def _sanitize(text: str) -> str:
-        """서로게이트 등 잘못된 유니코드를 제거한다."""
-        return text.encode("utf-8", errors="ignore").decode("utf-8")
-
     def _embed_openai(self, texts: list[str]) -> list[list[float]]:
         """OpenAI API를 사용하여 임베딩을 생성한다."""
-        texts = [self._sanitize(t) if t.strip() else " " for t in texts]
+        texts = [_sanitize(t) if t.strip() else " " for t in texts]
 
         all_embeddings = []
         batch_size = 100  # OpenAI 300,000 토큰/요청 한도 대응 (청크당 ~200토큰 기준)
@@ -110,10 +110,10 @@ class VectorStore:
 
     def _add_chroma(self, chunks: list[dict], embeddings: list[list[float]]):
         ids = [str(uuid.uuid4()) for _ in chunks]
-        documents = [c["text"] for c in chunks]
+        documents = [_sanitize(c["text"]) for c in chunks]
         metadatas = []
         for c in chunks:
-            meta = {k: str(v) for k, v in c.get("metadata", {}).items() if v is not None}
+            meta = {k: _sanitize(str(v)) for k, v in c.get("metadata", {}).items() if v is not None}
             metadatas.append(meta)
 
         batch_size = 5000

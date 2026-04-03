@@ -185,9 +185,7 @@ class RAGGenerator:
             response = client.chat.completions.create(
                 model=self.config.openai_chat_model,
                 messages=messages,
-                temperature=self.config.temperature,
-                top_p=self.config.top_p,
-                max_tokens=self.config.max_tokens,
+                max_completion_tokens=self.config.max_tokens,
                 stream=True,
             )
             chunks = []
@@ -200,9 +198,7 @@ class RAGGenerator:
         response = client.chat.completions.create(
             model=self.config.openai_chat_model,
             messages=messages,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            max_tokens=self.config.max_tokens,
+            max_completion_tokens=self.config.max_tokens,
         )
 
         usage = None
@@ -217,7 +213,12 @@ class RAGGenerator:
 
     def _call_hf(self, pipeline, user_prompt: str) -> tuple[str, dict | None]:
         full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-        result = pipeline(full_prompt)
+        result = pipeline(
+            full_prompt,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            do_sample=True,
+        )
         generated = result[0]["generated_text"]
         if full_prompt in generated:
             generated = generated[len(full_prompt) :].strip()

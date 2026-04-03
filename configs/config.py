@@ -46,8 +46,10 @@ class Config:
     use_multi_query: bool = False
 
     # ── Generation 설정 ────────────────────────────────────────────
-    temperature: float = 0.1
-    top_p: float = 0.9
+    # 시나리오 A (HuggingFace) 전용: temperature, top_p 지원
+    # 시나리오 B (gpt-5 계열): temperature/top_p 미지원, max_completion_tokens만 사용
+    temperature: float = 0.1          # Scenario A 전용
+    top_p: float = 0.9                # Scenario A 전용
     max_tokens: int = 2048
     conversation_memory_k: int = 5    # 유지할 대화 턴 수
 
