@@ -1,50 +1,26 @@
+# Secrets / local env
 .env
-data/vectordb/
-data/documents/
-data/processed/
-__pycache__/
-*.pyc
-.ipynb_checkpoints/
-evaluation/eval_results.json
-# =========================
-# 1. Python & 가상환경 (가장 기본)
-# =========================
-__pycache__/
-*.py[cod]
-*$py.class
-venv/
-env/
-.venv/
-.env
+.env.local
+.env.*.local
 myenv/
 
-# =========================
-# 2. Jupyter Notebook 찌꺼기 파일
-# =========================
-.ipynb_checkpoints
-*/.ipynb_checkpoints/*
-
-# =========================
-# 3. AI / 데이터 / 모델 가중치 (★중요)
-# 깃허브는 100MB 이상 파일을 못 올립니다!
-# =========================
-*.pt
-*.pth
-*.bin
-*.h5
-*.safetensors
-*.onnx
+# Raw input data (do not commit)
 data/
-datasets/
-logs/
-outputs/
-models/
-.notebook/
-files/
+!data/.gitkeep
 
-# =========================
-# 4. OS & IDE (에디터 설정 파일)
-# =========================
-.DS_Store
-.vscode/
-.idea/
+# Vector DB / indexes
+chroma_db/
+data/vectordb/
+
+# Evaluation outputs (project-root only)
+/evaluation/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+evaluation/eval_results.json
+
+# Logs
+*.log

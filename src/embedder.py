@@ -3,7 +3,6 @@
 시나리오 A (HuggingFace) / 시나리오 B (OpenAI) 지원
 """
 
-import os
 import uuid
 from typing import Optional
 
@@ -11,10 +10,6 @@ import numpy as np
 
 from configs.config import Config
 
-
-# ─────────────────────────────────────────────────────────────────
-# 임베딩 모델 추상화
-# ─────────────────────────────────────────────────────────────────
 
 class EmbeddingModel:
     """임베딩 모델 래퍼"""
@@ -28,10 +23,17 @@ class EmbeddingModel:
             return
 
         if self.config.scenario == "B":
+            if not self.config.openai_api_key:
+                raise ValueError("OPENAI_API_KEY is not set.")
             from openai import OpenAI
+
             self._client = OpenAI(api_key=self.config.openai_api_key)
         else:
+            if not self.config.hf_token:
+                raise ValueError("HF_TOKEN is not set. .env 파일에 HF_TOKEN을 추가하세요.")
             from sentence_transformers import SentenceTransformer
+            import huggingface_hub
+            huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
             self._model = SentenceTransformer(
                 self.config.hf_embedding_model,
                 device=self.config.device,
@@ -43,23 +45,25 @@ class EmbeddingModel:
 
         if self.config.scenario == "B":
             return self._embed_openai(texts)
-        else:
-            return self._embed_hf(texts)
+        return self._embed_hf(texts)
 
     def embed_query(self, query: str) -> list[float]:
         """단일 쿼리를 임베딩한다."""
         return self.embed_texts([query])[0]
 
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        """서로게이트 등 잘못된 유니코드를 제거한다."""
+        return text.encode("utf-8", errors="ignore").decode("utf-8")
+
     def _embed_openai(self, texts: list[str]) -> list[list[float]]:
         """OpenAI API를 사용하여 임베딩을 생성한다."""
-        # 빈 텍스트 처리
-        texts = [t if t.strip() else " " for t in texts]
+        texts = [self._sanitize(t) if t.strip() else " " for t in texts]
 
-        # 배치 처리 (한 번에 최대 2048개)
         all_embeddings = []
         batch_size = 2048
         for i in range(0, len(texts), batch_size):
-            batch = texts[i: i + batch_size]
+            batch = texts[i : i + batch_size]
             response = self._client.embeddings.create(
                 model=self.config.openai_embedding_model,
                 input=batch,
@@ -71,15 +75,9 @@ class EmbeddingModel:
 
     def _embed_hf(self, texts: list[str]) -> list[list[float]]:
         """HuggingFace 모델을 사용하여 임베딩을 생성한다."""
-        embeddings = self._model.encode(
-            texts, show_progress_bar=True, batch_size=32
-        )
+        embeddings = self._model.encode(texts, show_progress_bar=True, batch_size=32)
         return embeddings.tolist()
 
-
-# ─────────────────────────────────────────────────────────────────
-# Vector DB 관리
-# ─────────────────────────────────────────────────────────────────
 
 class VectorStore:
     """ChromaDB 또는 FAISS 기반 벡터 스토어"""
@@ -90,13 +88,21 @@ class VectorStore:
         self._store = None
         self._store_type = config.vectordb_type
 
-    # ── ChromaDB ───────────────────────────────────────────────
-
-    def _init_chroma(self, collection_name: str = "rfp_documents"):
+    def _init_chroma(
+        self,
+        collection_name: str = "rfp_documents",
+        reset_collection: bool = False,
+    ):
         import chromadb
-        self._chroma_client = chromadb.PersistentClient(
-            path=self.config.vectordb_dir
-        )
+
+        self._chroma_client = chromadb.PersistentClient(path=self.config.vectordb_dir)
+        if reset_collection:
+            try:
+                self._chroma_client.delete_collection(collection_name)
+            except Exception:
+                # Collection may not exist.
+                pass
+
         self._collection = self._chroma_client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
@@ -110,14 +116,13 @@ class VectorStore:
             meta = {k: str(v) for k, v in c.get("metadata", {}).items() if v is not None}
             metadatas.append(meta)
 
-        # 배치 업서트 (Chroma 제한: 한 번에 41666개)
         batch_size = 5000
         for i in range(0, len(chunks), batch_size):
             self._collection.add(
-                ids=ids[i: i + batch_size],
-                embeddings=embeddings[i: i + batch_size],
-                documents=documents[i: i + batch_size],
-                metadatas=metadatas[i: i + batch_size],
+                ids=ids[i : i + batch_size],
+                embeddings=embeddings[i : i + batch_size],
+                documents=documents[i : i + batch_size],
+                metadatas=metadatas[i : i + batch_size],
             )
 
     def _query_chroma(
@@ -138,26 +143,28 @@ class VectorStore:
 
         output = []
         for i in range(len(results["documents"][0])):
-            output.append({
-                "text": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "distance": results["distances"][0][i],
-                "score": 1 - results["distances"][0][i],  # cosine distance → similarity
-            })
+            output.append(
+                {
+                    "text": results["documents"][0][i],
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i],
+                    "score": 1 - results["distances"][0][i],
+                }
+            )
         return output
-
-    # ── FAISS ──────────────────────────────────────────────────
 
     def _init_faiss(self):
         import faiss
-        self._faiss_index = faiss.IndexFlatIP(self.config.embedding_dim)  # inner product (cosine after normalization)
+
+        self._faiss_index = faiss.IndexFlatIP(self.config.embedding_dim)
         self._faiss_docs = []
         self._faiss_metas = []
 
     def _add_faiss(self, chunks: list[dict], embeddings: list[list[float]]):
+        import faiss as _faiss
+
         arr = np.array(embeddings, dtype="float32")
-        # L2 정규화 → inner product = cosine similarity
-        faiss.normalize_L2(arr)
+        _faiss.normalize_L2(arr)
         self._faiss_index.add(arr)
         self._faiss_docs.extend([c["text"] for c in chunks])
         self._faiss_metas.extend([c.get("metadata", {}) for c in chunks])
@@ -180,31 +187,31 @@ class VectorStore:
                 continue
             meta = self._faiss_metas[idx]
 
-            # 메타데이터 필터 적용
             if where:
-                match = all(
-                    str(meta.get(k, "")) == str(v)
-                    for k, v in where.items()
-                )
+                match = all(str(meta.get(k, "")) == str(v) for k, v in where.items())
                 if not match:
                     continue
 
-            output.append({
-                "text": self._faiss_docs[idx],
-                "metadata": meta,
-                "score": float(score),
-            })
+            output.append(
+                {
+                    "text": self._faiss_docs[idx],
+                    "metadata": meta,
+                    "score": float(score),
+                }
+            )
             if len(output) >= top_k:
                 break
 
         return output
 
-    # ── 통합 인터페이스 ────────────────────────────────────────
-
-    def initialize(self, collection_name: str = "rfp_documents"):
+    def initialize(
+        self,
+        collection_name: str = "rfp_documents",
+        reset_collection: bool = False,
+    ):
         """벡터 스토어를 초기화한다."""
         if self._store_type == "chroma":
-            self._init_chroma(collection_name)
+            self._init_chroma(collection_name, reset_collection=reset_collection)
         else:
             self._init_faiss()
 
@@ -215,11 +222,10 @@ class VectorStore:
 
         texts = [c["text"] for c in chunks]
 
-        # 배치 임베딩
         batch_size = 500
         all_embeddings = []
         for i in range(0, len(texts), batch_size):
-            batch = texts[i: i + batch_size]
+            batch = texts[i : i + batch_size]
             embs = self.embedding_model.embed_texts(batch)
             all_embeddings.extend(embs)
             if show_progress:
@@ -244,12 +250,10 @@ class VectorStore:
 
         if self._store_type == "chroma":
             return self._query_chroma(query_embedding, top_k, where)
-        else:
-            return self._query_faiss(query_embedding, top_k, where)
+        return self._query_faiss(query_embedding, top_k, where)
 
     def get_collection_count(self) -> int:
         """저장된 문서 수를 반환한다."""
         if self._store_type == "chroma":
             return self._collection.count()
-        else:
-            return self._faiss_index.ntotal
+        return self._faiss_index.ntotal
