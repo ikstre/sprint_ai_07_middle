@@ -151,7 +151,7 @@ class RAGGenerator:
         context = self._build_context(retrieved_docs)
         rag_prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=query)
 
-        answer, usage = self._call_llm(rag_prompt, stream=stream)
+        answer, usage = self._call_llm(rag_prompt, stream=stream, query=query)
 
         self.memory.add_user_message(query)
         self.memory.add_assistant_message(answer)
@@ -169,25 +169,35 @@ class RAGGenerator:
             "answer_char_len": len(answer),
         }
 
-    def _call_llm(self, user_prompt: str, stream: bool = False) -> tuple[str, dict | None]:
+    def _call_llm(self, user_prompt: str, stream: bool = False, query: str = "") -> tuple[str, dict | None]:
         client = self._get_llm_client()
 
         if self.config.scenario == "B":
-            return self._call_openai(client, user_prompt, stream)
+            return self._call_openai(client, user_prompt, stream, query=query)
         return self._call_hf(client, user_prompt)
 
-    def _call_openai(self, client, user_prompt: str, stream: bool = False) -> tuple[str, dict | None]:
+    def _route_model(self, query: str) -> str:
+        """쿼리 복잡도에 따라 모델을 자동 선택한다."""
+        if not self.config.auto_model_routing:
+            return self.config.openai_chat_model
+        if len(query) <= self.config.routing_complexity_threshold:
+            return self.config.routing_simple_model
+        return self.config.openai_chat_model
+
+    def _call_openai(self, client, user_prompt: str, stream: bool = False, query: str = "") -> tuple[str, dict | None]:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(self.memory.get_messages())
         messages.append({"role": "user", "content": user_prompt})
+        model = self._route_model(query or user_prompt)
+
+        effort = getattr(self.config, "reasoning_effort", "medium")
 
         if stream:
             response = client.chat.completions.create(
-                model=self.config.openai_chat_model,
+                model=model,
                 messages=messages,
-                temperature=self.config.temperature,
-                top_p=self.config.top_p,
-                max_tokens=self.config.max_tokens,
+                max_completion_tokens=self.config.max_tokens,
+                reasoning_effort=effort,
                 stream=True,
             )
             chunks = []
@@ -198,11 +208,10 @@ class RAGGenerator:
             return "".join(chunks), None
 
         response = client.chat.completions.create(
-            model=self.config.openai_chat_model,
+            model=model,
             messages=messages,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            max_tokens=self.config.max_tokens,
+            max_completion_tokens=self.config.max_tokens,
+            reasoning_effort=effort,
         )
 
         usage = None
@@ -213,11 +222,33 @@ class RAGGenerator:
                 "total_tokens": getattr(response.usage, "total_tokens", None),
             }
 
-        return response.choices[0].message.content, usage
+        message = response.choices[0].message
+        content = message.content
+
+        # gpt-5 계열: content가 list[{"type":"text","text":"..."}] 형태로 올 수 있음
+        if isinstance(content, list):
+            content = "".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content
+            )
+
+        if not content:
+            content = (
+                getattr(message, "output_text", None)
+                or getattr(message, "refusal", None)
+                or ""
+            )
+
+        return content, usage
 
     def _call_hf(self, pipeline, user_prompt: str) -> tuple[str, dict | None]:
         full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-        result = pipeline(full_prompt)
+        result = pipeline(
+            full_prompt,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            do_sample=True,
+        )
         generated = result[0]["generated_text"]
         if full_prompt in generated:
             generated = generated[len(full_prompt) :].strip()

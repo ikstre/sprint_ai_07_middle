@@ -65,7 +65,7 @@ def check_openai() -> bool:
         print(f"  Embedding 모델: {embedding_models if embedding_models else '없음'}")
 
         if not embedding_models:
-            print("  [WARN] 임베딩 모델 없음 → 업체에 text-embedding-3-small 권한 요청 필요")
+            print("  [WARN] 임베딩 모델 없음 → 코드잇에 text-embedding-3-small 권한 요청 필요")
             return False
         return True
 

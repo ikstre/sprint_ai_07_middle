@@ -11,6 +11,11 @@ import numpy as np
 from configs.config import Config
 
 
+def _sanitize(text: str) -> str:
+    """서로게이트 등 잘못된 유니코드를 제거한다."""
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 class EmbeddingModel:
     """임베딩 모델 래퍼"""
 
@@ -51,27 +56,84 @@ class EmbeddingModel:
         """단일 쿼리를 임베딩한다."""
         return self.embed_texts([query])[0]
 
-    @staticmethod
-    def _sanitize(text: str) -> str:
-        """서로게이트 등 잘못된 유니코드를 제거한다."""
-        return text.encode("utf-8", errors="ignore").decode("utf-8")
-
-    def _embed_openai(self, texts: list[str]) -> list[list[float]]:
+    def _embed_openai(self, texts: list[str], use_batch_api: bool = False) -> list[list[float]]:
         """OpenAI API를 사용하여 임베딩을 생성한다."""
-        texts = [self._sanitize(t) if t.strip() else " " for t in texts]
+        texts = [_sanitize(t) if t.strip() else " " for t in texts]
+        dim = getattr(self.config, "openai_embedding_dim", 512)
+
+        if use_batch_api and len(texts) > 500:
+            return self._embed_openai_batch(texts, dim)
 
         all_embeddings = []
-        batch_size = 2048
+        batch_size = 100  # OpenAI 300,000 토큰/요청 한도 대응 (청크당 ~200토큰 기준)
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             response = self._client.embeddings.create(
                 model=self.config.openai_embedding_model,
                 input=batch,
+                dimensions=dim,
             )
             batch_embs = [item.embedding for item in response.data]
             all_embeddings.extend(batch_embs)
 
         return all_embeddings
+
+    def _embed_openai_batch(self, texts: list[str], dim: int) -> list[list[float]]:
+        """OpenAI Batch API를 사용해 임베딩을 생성한다 (비용 50% 절감, 대용량 인덱싱 전용)."""
+        import json
+        import time
+        import tempfile
+        import os
+
+        print(f"  [Batch API] {len(texts)}개 텍스트 배치 임베딩 시작...")
+
+        # JSONL 요청 파일 생성
+        requests = [
+            {
+                "custom_id": str(i),
+                "method": "POST",
+                "url": "/v1/embeddings",
+                "body": {
+                    "model": self.config.openai_embedding_model,
+                    "input": text,
+                    "dimensions": dim,
+                },
+            }
+            for i, text in enumerate(texts)
+        ]
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
+            for req in requests:
+                f.write(json.dumps(req, ensure_ascii=False) + "\n")
+            tmp_path = f.name
+
+        try:
+            with open(tmp_path, "rb") as f:
+                batch_file = self._client.files.create(file=f, purpose="batch")
+
+            batch_job = self._client.batches.create(
+                input_file_id=batch_file.id,
+                endpoint="/v1/embeddings",
+                completion_window="24h",
+            )
+            print(f"  [Batch API] job_id={batch_job.id} 생성. 완료 대기 중...")
+
+            while True:
+                job = self._client.batches.retrieve(batch_job.id)
+                if job.status == "completed":
+                    break
+                if job.status in ("failed", "cancelled", "expired"):
+                    raise RuntimeError(f"Batch API 실패: {job.status}")
+                time.sleep(30)
+                print(f"  [Batch API] 상태: {job.status} ...")
+
+            content = self._client.files.content(job.output_file_id).text
+            results = [json.loads(line) for line in content.strip().split("\n")]
+            results.sort(key=lambda x: int(x["custom_id"]))
+            print(f"  [Batch API] 완료.")
+            return [r["response"]["body"]["data"][0]["embedding"] for r in results]
+        finally:
+            os.unlink(tmp_path)
 
     def _embed_hf(self, texts: list[str]) -> list[list[float]]:
         """HuggingFace 모델을 사용하여 임베딩을 생성한다."""
@@ -110,10 +172,10 @@ class VectorStore:
 
     def _add_chroma(self, chunks: list[dict], embeddings: list[list[float]]):
         ids = [str(uuid.uuid4()) for _ in chunks]
-        documents = [c["text"] for c in chunks]
+        documents = [_sanitize(c["text"]) for c in chunks]
         metadatas = []
         for c in chunks:
-            meta = {k: str(v) for k, v in c.get("metadata", {}).items() if v is not None}
+            meta = {k: _sanitize(str(v)) for k, v in c.get("metadata", {}).items() if v is not None}
             metadatas.append(meta)
 
         batch_size = 5000
@@ -215,21 +277,26 @@ class VectorStore:
         else:
             self._init_faiss()
 
-    def add_documents(self, chunks: list[dict], show_progress: bool = True):
+    def add_documents(self, chunks: list[dict], show_progress: bool = True, use_batch_api: bool = False):
         """청크들을 임베딩하여 벡터 스토어에 추가한다."""
         if show_progress:
             print(f"임베딩 생성 중... ({len(chunks)}개 청크)")
 
         texts = [c["text"] for c in chunks]
 
-        batch_size = 500
-        all_embeddings = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            embs = self.embedding_model.embed_texts(batch)
-            all_embeddings.extend(embs)
-            if show_progress:
-                print(f"  {min(i + batch_size, len(texts))}/{len(texts)} 완료")
+        # Batch API: 전체 텍스트를 한 번에 처리 (비용 50% 절감)
+        if use_batch_api and self.config.scenario == "B":
+            self.embedding_model._init_model()
+            all_embeddings = self.embedding_model._embed_openai(texts, use_batch_api=True)
+        else:
+            batch_size = 500
+            all_embeddings = []
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                embs = self.embedding_model.embed_texts(batch)
+                all_embeddings.extend(embs)
+                if show_progress:
+                    print(f"  {min(i + batch_size, len(texts))}/{len(texts)} 완료")
 
         if self._store_type == "chroma":
             self._add_chroma(chunks, all_embeddings)

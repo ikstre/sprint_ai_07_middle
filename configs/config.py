@@ -23,7 +23,14 @@ class Config:
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-5-mini"          # gpt-5-mini, gpt-5-nano, gpt-5
-    openai_embedding_dim: int = 1536
+    openai_embedding_dim: int = 512                # 차원 축소 (원본 1536 → 512, 비용/속도 개선)
+
+    # ── OpenAI 고급 설정 ───────────────────────────────────────────
+    reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    # 쿼리 복잡도 기반 자동 모델 라우팅 (단순 → gpt-5-nano, 복잡 → openai_chat_model)
+    auto_model_routing: bool = True
+    routing_simple_model: str = "gpt-5-nano"       # 단순 질문용 경량 모델
+    routing_complexity_threshold: int = 50         # 글자 수 기준 단순/복잡 분기점
 
     # ── 시나리오 A: HuggingFace 로컬 모델 설정 ─────────────────────
     hf_token: str = field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
@@ -33,7 +40,7 @@ class Config:
     device: str = "cuda"  # GCP VM에서는 cuda 사용
 
     # ── 청킹 설정 ──────────────────────────────────────────────────
-    chunk_size: int = 800
+    chunk_size: int = 1200
     chunk_overlap: int = 200
     chunking_method: Literal["naive", "semantic"] = "naive"
 
@@ -46,9 +53,11 @@ class Config:
     use_multi_query: bool = False
 
     # ── Generation 설정 ────────────────────────────────────────────
-    temperature: float = 0.1
-    top_p: float = 0.9
-    max_tokens: int = 2048
+    # 시나리오 A (HuggingFace) 전용: temperature, top_p 지원
+    # 시나리오 B (gpt-5 계열): temperature/top_p 미지원, max_completion_tokens만 사용
+    temperature: float = 0.1          # Scenario A 전용
+    top_p: float = 0.9                # Scenario A 전용
+    max_tokens: int = 16000  # reasoning 모델(gpt-5 계열)은 내부 추론 토큰 포함으로 충분히 크게 설정
     conversation_memory_k: int = 5    # 유지할 대화 턴 수
 
     # ── Vector DB 설정 ─────────────────────────────────────────────

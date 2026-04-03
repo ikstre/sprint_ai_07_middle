@@ -29,13 +29,14 @@ class RAGPipeline:
         documents: list[dict],
         collection_name: str = "rfp_documents",
         reset_collection: bool = True,
+        use_batch_api: bool = False,
     ):
         """문서 리스트로 벡터 인덱스를 구축한다."""
         self.vector_store.initialize(
             collection_name=collection_name,
             reset_collection=reset_collection,
         )
-        self.vector_store.add_documents(documents)
+        self.vector_store.add_documents(documents, use_batch_api=use_batch_api)
         self._initialized = True
 
     def query(self, question: str, **kwargs) -> dict:

@@ -28,20 +28,64 @@ st.caption("제안요청서(RFP)의 핵심 내용을 빠르게 파악하세요."
 with st.sidebar:
     st.header("⚙️ 설정")
 
-    model = st.selectbox(
-        "LLM 모델",
-        ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
+    scenario = st.radio(
+        "실행 모드",
+        ["B: OpenAI API", "A: 로컬 HuggingFace"],
         index=0,
+        horizontal=True,
     )
+    scenario_key = scenario.split(":")[0].strip()  # "A" or "B"
+
+    st.divider()
+
+    collection = st.selectbox(
+        "컬렉션 (청크 크기)",
+        ["rfp_chunk1200", "rfp_chunk800", "rfp_documents"],
+        index=0,
+        help="인덱싱 시 사용한 청크 크기별 컬렉션을 선택합니다.",
+    )
+
+    if scenario_key == "B":
+        model = st.selectbox(
+            "LLM 모델",
+            ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
+            index=0,
+        )
+        temperature = 0.1   # gpt-5 미지원, 내부적으로만 유지
+    else:
+        model = st.selectbox(
+            "LLM 모델",
+            ["google/gemma-3-4b-it"],
+            index=0,
+        )
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
+
     retrieval_method = st.selectbox(
         "검색 방식",
         ["similarity", "mmr", "hybrid"],
         index=0,
     )
     top_k = st.slider("Top-K (검색 결과 수)", 3, 15, 5)
-    temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
     use_reranker = st.checkbox("Re-ranking 사용", value=False)
     use_multi_query = st.checkbox("Multi-Query 사용", value=False)
+
+    if scenario_key == "B":
+        st.divider()
+        st.markdown("**OpenAI 고급 설정**")
+        reasoning_effort = st.select_slider(
+            "Reasoning Effort",
+            options=["low", "medium", "high"],
+            value="medium",
+            help="low: 빠름/저렴, high: 정확/느림. 단순 질문은 low 권장.",
+        )
+        auto_model_routing = st.checkbox(
+            "자동 모델 라우팅",
+            value=True,
+            help="짧은 질문은 gpt-5-nano, 복잡한 질문은 선택 모델 자동 적용.",
+        )
+    else:
+        reasoning_effort = "medium"
+        auto_model_routing = False
 
     st.divider()
     if st.button("🗑️ 대화 초기화"):
@@ -67,19 +111,22 @@ with st.sidebar:
 def _pipeline_signature() -> tuple:
     """세션 내에서 파이프라인 재생성이 필요한 설정만 signature로 사용한다."""
     return (
+        scenario_key,
+        collection,
         model,
         retrieval_method,
         top_k,
         temperature,
         use_reranker,
         use_multi_query,
+        reasoning_effort,
+        auto_model_routing,
     )
 
 
 def _build_config() -> Config:
-    return Config(
-        scenario="B",
-        openai_chat_model=model,
+    base = dict(
+        scenario=scenario_key,
         metadata_csv="data/data_list.csv",
         vectordb_dir="data/vectordb",
         retrieval_method=retrieval_method,
@@ -87,11 +134,21 @@ def _build_config() -> Config:
         temperature=temperature,
         use_reranker=use_reranker,
         use_multi_query=use_multi_query,
+        reasoning_effort=reasoning_effort,
+        auto_model_routing=auto_model_routing,
     )
+    if scenario_key == "B":
+        base["openai_chat_model"] = model
+    else:
+        base["hf_chat_model"] = model
+    return Config(**base)
 
 
-if not os.getenv("OPENAI_API_KEY"):
+if scenario_key == "B" and not os.getenv("OPENAI_API_KEY"):
     st.error("OPENAI_API_KEY가 설정되지 않았습니다. `.env`를 확인해 주세요.")
+    st.stop()
+if scenario_key == "A" and not os.getenv("HF_TOKEN"):
+    st.error("HF_TOKEN이 설정되지 않았습니다. `.env`를 확인해 주세요.")
     st.stop()
 
 
@@ -99,7 +156,7 @@ try:
     current_sig = _pipeline_signature()
     if st.session_state.get("pipeline_signature") != current_sig:
         pipeline = RAGPipeline(_build_config())
-        pipeline.initialize_vectorstore()
+        pipeline.initialize_vectorstore(collection_name=collection)
         st.session_state.pipeline = pipeline
         st.session_state.pipeline_signature = current_sig
     pipeline = st.session_state.pipeline
