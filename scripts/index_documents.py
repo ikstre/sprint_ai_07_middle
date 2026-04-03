@@ -92,7 +92,11 @@ def step_embed(args, config: Config, chunk_file: Path):
     print(f"\n임베딩 생성 및 벡터스토어 저장 중...")
 
     pipeline = RAGPipeline(config)
-    pipeline.build_index(chunks, collection_name=args.collection)
+    pipeline.build_index(
+        chunks,
+        collection_name=args.collection,
+        use_batch_api=getattr(args, "use_batch_api", False),
+    )
 
     print(f"\n벡터스토어 저장 완료")
     print(f"  컬렉션: {args.collection}")
@@ -123,6 +127,10 @@ def main():
         "--documents-dir", type=str, default="data",
         help="문서 디렉토리 경로",
     )
+    parser.add_argument(
+        "--use-batch-api", action="store_true",
+        help="OpenAI Batch API 사용 (500개 이상 청크 시 비용 50%% 절감, 처리 시간 증가)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -131,6 +139,7 @@ def main():
     print(f"  시나리오  : {args.scenario}")
     print(f"  청킹 전략 : {args.method} | 크기: {args.chunk_size} | 중첩: {args.chunk_overlap}")
     print(f"  컬렉션    : {args.collection}")
+    print(f"  Batch API : {'ON' if args.use_batch_api else 'OFF'}")
     print("=" * 60)
 
     config = Config(

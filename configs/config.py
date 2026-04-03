@@ -23,7 +23,14 @@ class Config:
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-5-mini"          # gpt-5-mini, gpt-5-nano, gpt-5
-    openai_embedding_dim: int = 1536
+    openai_embedding_dim: int = 512                # 차원 축소 (원본 1536 → 512, 비용/속도 개선)
+
+    # ── OpenAI 고급 설정 ───────────────────────────────────────────
+    reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    # 쿼리 복잡도 기반 자동 모델 라우팅 (단순 → gpt-5-nano, 복잡 → openai_chat_model)
+    auto_model_routing: bool = True
+    routing_simple_model: str = "gpt-5-nano"       # 단순 질문용 경량 모델
+    routing_complexity_threshold: int = 50         # 글자 수 기준 단순/복잡 분기점
 
     # ── 시나리오 A: HuggingFace 로컬 모델 설정 ─────────────────────
     hf_token: str = field(default_factory=lambda: os.getenv("HF_TOKEN", ""))

@@ -69,6 +69,24 @@ with st.sidebar:
     use_reranker = st.checkbox("Re-ranking 사용", value=False)
     use_multi_query = st.checkbox("Multi-Query 사용", value=False)
 
+    if scenario_key == "B":
+        st.divider()
+        st.markdown("**OpenAI 고급 설정**")
+        reasoning_effort = st.select_slider(
+            "Reasoning Effort",
+            options=["low", "medium", "high"],
+            value="medium",
+            help="low: 빠름/저렴, high: 정확/느림. 단순 질문은 low 권장.",
+        )
+        auto_model_routing = st.checkbox(
+            "자동 모델 라우팅",
+            value=True,
+            help="짧은 질문은 gpt-5-nano, 복잡한 질문은 선택 모델 자동 적용.",
+        )
+    else:
+        reasoning_effort = "medium"
+        auto_model_routing = False
+
     st.divider()
     if st.button("🗑️ 대화 초기화"):
         st.session_state.messages = []
@@ -101,6 +119,8 @@ def _pipeline_signature() -> tuple:
         temperature,
         use_reranker,
         use_multi_query,
+        reasoning_effort,
+        auto_model_routing,
     )
 
 
@@ -114,6 +134,8 @@ def _build_config() -> Config:
         temperature=temperature,
         use_reranker=use_reranker,
         use_multi_query=use_multi_query,
+        reasoning_effort=reasoning_effort,
+        auto_model_routing=auto_model_routing,
     )
     if scenario_key == "B":
         base["openai_chat_model"] = model
