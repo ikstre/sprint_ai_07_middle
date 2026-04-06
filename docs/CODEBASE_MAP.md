@@ -14,17 +14,28 @@
 
 ## 핵심 모듈
 - `configs/config.py`
-  - 전체 런타임 설정 (Scenario A/B, Retrieval, Generation, VectorDB).
+  - 전체 런타임 설정. 주요 필드:
+    - `scenario`: A (HuggingFace 로컬) / B (OpenAI API)
+    - `openai_embedding_dim`: 512 (원본 1536 대비 67% 절감)
+    - `reasoning_effort`: low / medium / high (gpt-5 계열 추론 깊이)
+    - `auto_model_routing`: 쿼리 복잡도 기반 모델 자동 선택 (bool)
+    - `routing_simple_model`: 단순 질문용 경량 모델 (gpt-5-nano)
+    - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (50)
+    - `max_tokens`: 16000 (reasoning 토큰 포함 충분히 확보)
 - `src/document_loader.py`
   - `pdf`, `hwp` 파일 로딩 + `data_list.csv` 메타데이터 병합.
 - `src/chunker.py`
   - `naive`, `semantic` 청킹 로직.
 - `src/embedder.py`
   - 임베딩 생성 (`OpenAI` 또는 `SentenceTransformer`) + VectorStore 래퍼.
+  - OpenAI: 차원 축소(`dimensions=512`), Batch API 지원 (`use_batch_api=True`).
 - `src/retriever.py`
   - similarity/MMR/hybrid, multi-query, reranker.
+  - gpt-5 계열 호환: `max_completion_tokens` 사용, `temperature` 조건부 적용.
 - `src/generator.py`
   - RAG 프롬프트 생성, LLM 호출, 대화 메모리.
+  - `_route_model()`: 쿼리 복잡도 기반 모델 자동 선택.
+  - gpt-5 계열: `reasoning_effort`, `max_completion_tokens` 적용.
 - `src/rag_pipeline.py`
   - 검색/생성/출처 정리를 묶은 오케스트레이션 레이어.
 
