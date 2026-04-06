@@ -22,6 +22,9 @@
     - `routing_simple_model`: 단순 질문용 경량 모델 (gpt-5-nano)
     - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (50)
     - `max_tokens`: 16000 (reasoning 토큰 포함 충분히 확보)
+    - `device`: "auto" — cuda → mps → cpu 자동 감지 (Scenario A)
+    - `hf_max_new_tokens`: 1024 (HF 생성 전용, OpenAI max_tokens와 분리)
+    - `hf_load_in_4bit`: False — 4-bit 양자화 활성화 시 bitsandbytes 필요
 - `src/document_loader.py`
   - `pdf`, `hwp` 파일 로딩 + `data_list.csv` 메타데이터 병합.
 - `src/chunker.py`
@@ -29,13 +32,16 @@
 - `src/embedder.py`
   - 임베딩 생성 (`OpenAI` 또는 `SentenceTransformer`) + VectorStore 래퍼.
   - OpenAI: 차원 축소(`dimensions=512`), Batch API 지원 (`use_batch_api=True`).
+  - `_resolve_device()`: cuda → mps → cpu 자동 감지 (Scenario A 임베딩용).
 - `src/retriever.py`
   - similarity/MMR/hybrid, multi-query, reranker.
   - gpt-5 계열 호환: `max_completion_tokens` 사용, `temperature` 조건부 적용.
 - `src/generator.py`
   - RAG 프롬프트 생성, LLM 호출, 대화 메모리.
-  - `_route_model()`: 쿼리 복잡도 기반 모델 자동 선택.
+  - `_route_model()`: 쿼리 복잡도 기반 모델 자동 선택 (Scenario B).
   - gpt-5 계열: `reasoning_effort`, `max_completion_tokens` 적용.
+  - `_init_hf_model()`: AutoModelForCausalLM + AutoTokenizer 로드, 4-bit 양자화 옵션.
+  - `_call_hf()`: `apply_chat_template()`으로 Gemma-3 채팅 형식 적용, 입력 토큰 제외 디코딩.
 - `src/rag_pipeline.py`
   - 검색/생성/출처 정리를 묶은 오케스트레이션 레이어.
 

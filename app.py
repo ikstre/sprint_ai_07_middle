@@ -52,6 +52,7 @@ with st.sidebar:
             index=0,
         )
         temperature = 0.1   # gpt-5 미지원, 내부적으로만 유지
+        hf_load_in_4bit = False
     else:
         model = st.selectbox(
             "LLM 모델",
@@ -59,6 +60,11 @@ with st.sidebar:
             index=0,
         )
         temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
+        hf_load_in_4bit = st.checkbox(
+            "4-bit 양자화 (bitsandbytes)",
+            value=False,
+            help="VRAM이 부족할 때 사용. bitsandbytes 패키지 및 CUDA 필요.",
+        )
 
     retrieval_method = st.selectbox(
         "검색 방식",
@@ -121,6 +127,7 @@ def _pipeline_signature() -> tuple:
         use_multi_query,
         reasoning_effort,
         auto_model_routing,
+        hf_load_in_4bit,
     )
 
 
@@ -141,6 +148,7 @@ def _build_config() -> Config:
         base["openai_chat_model"] = model
     else:
         base["hf_chat_model"] = model
+        base["hf_load_in_4bit"] = hf_load_in_4bit
     return Config(**base)
 
 
