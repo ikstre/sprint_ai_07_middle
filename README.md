@@ -84,19 +84,46 @@ pip install -r requirements.txt
 
 ### 3-1. 인덱싱
 
+인덱싱은 **청킹 → 임베딩** 2단계로 구성됩니다. 에러 발생 시 완료된 단계부터 재실행할 수 있습니다.
+
 ```bash
-python scripts/index_documents.py \
-  --scenario B \
-  --method semantic \
-  --chunk-size 800 \
-  --chunk-overlap 200
+# 전체 실행 (기본, 1200자 청크)
+python scripts/index_documents.py --collection rfp_chunk1200
+
+# 비교용 800자 컬렉션 추가 인덱싱
+python scripts/index_documents.py --chunk-size 800 --collection rfp_chunk800
+
+# 단계별 실행 (디버깅 시)
+python scripts/index_documents.py --step chunk --collection rfp_chunk1200   # 1단계: 청킹만
+python scripts/index_documents.py --step embed --collection rfp_chunk1200   # 2단계: 임베딩만
+
+# Batch API 사용 (500개 이상 청크 시 비용 50% 절감)
+python scripts/index_documents.py --use-batch-api --collection rfp_chunk1200
 ```
+
+**컬렉션 개념**: 청크 크기별로 별도 벡터DB 컬렉션을 생성해 성능을 비교할 수 있습니다.
+
+| 컬렉션 | 청크 크기 | 특징 |
+|--------|---------|------|
+| `rfp_chunk1200` | 1200자 (기본값) | 문맥 풍부, 청크 수 적음 |
+| `rfp_chunk800` | 800자 | 정밀도 높음, 청크 수 많음 |
 
 ### 3-2. 서비스 앱 실행
 
 ```bash
 streamlit run app.py
 ```
+
+#### 사이드바 주요 설정
+
+| 설정 | 옵션 | 설명 |
+|------|------|------|
+| 실행 모드 | B: OpenAI API / A: 로컬 HuggingFace | Scenario 전환 |
+| 컬렉션 | rfp_chunk1200 / rfp_chunk800 | 인덱싱된 컬렉션 선택 |
+| LLM 모델 | gpt-5-mini / gpt-5-nano / gpt-5 (B안) | 생성 모델 |
+| 검색 방식 | similarity / mmr / hybrid | 벡터 검색 전략 |
+| Reasoning Effort | low / medium / high | gpt-5 추론 깊이 (B안 전용) |
+| 자동 모델 라우팅 | 체크박스 | 단순 질문→nano, 복잡→mini 자동 전환 |
 
 ---
 
