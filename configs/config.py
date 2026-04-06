@@ -37,7 +37,9 @@ class Config:
     hf_embedding_model: str = "intfloat/multilingual-e5-large"
     hf_chat_model: str = "google/gemma-3-4b-it"
     hf_embedding_dim: int = 1024
-    device: str = "cuda"  # GCP VM에서는 cuda 사용
+    device: str = "auto"          # "auto": cuda → mps → cpu 자동 감지
+    hf_max_new_tokens: int = 1024  # HF 생성 최대 토큰 (OpenAI max_tokens와 분리)
+    hf_load_in_4bit: bool = False  # 4-bit 양자화 (VRAM 절약, bitsandbytes 필요)
 
     # ── 청킹 설정 ──────────────────────────────────────────────────
     chunk_size: int = 1200

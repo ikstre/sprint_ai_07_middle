@@ -16,6 +16,19 @@ def _sanitize(text: str) -> str:
     return text.encode("utf-8", errors="ignore").decode("utf-8")
 
 
+def _resolve_device() -> str:
+    """cuda → mps → cpu 순서로 사용 가능한 디바이스를 감지한다."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
 class EmbeddingModel:
     """임베딩 모델 래퍼"""
 
@@ -39,9 +52,14 @@ class EmbeddingModel:
             from sentence_transformers import SentenceTransformer
             import huggingface_hub
             huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
+
+            device = self.config.device
+            if device == "auto":
+                device = _resolve_device()
+
             self._model = SentenceTransformer(
                 self.config.hf_embedding_model,
-                device=self.config.device,
+                device=device,
             )
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
