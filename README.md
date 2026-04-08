@@ -3,7 +3,7 @@
 기업/공공 RFP 문서를 대상으로 한 RAG 시스템 프로젝트입니다.  
 본 저장소는 아래 3가지를 모두 제공합니다.
 
-1. 실서비스용 RAG 앱/파이프라인
+1. 실서비스용 RAG 앱/파이프라인 (Scenario A/B 모두 지원)
 2. AutoRAG 기반 자동 최적화 실험 파이프라인
 3. 운영/튜닝을 분리한 평가 체계 (`core` vs `detailed`)
 
@@ -24,29 +24,33 @@
 ## 1) 최종 구현 범위
 
 ### A. RAG 서비스
-- 문서 로딩: PDF/HWP
-- 청킹: naive/semantic
-- 검색: similarity/MMR/hybrid + (옵션) multi-query/rerank
-- 생성: OpenAI 기반 답변 생성 + 대화 메모리
-- UI: Streamlit 앱
+
+| 항목 | Scenario B (OpenAI API) | Scenario A (로컬 HuggingFace) |
+|------|------------------------|------------------------------|
+| 문서 로딩 | PDF / HWP / TXT / CSV | 동일 |
+| 청킹 | naive / semantic | 동일 |
+| 임베딩 | text-embedding-3-small (dim=512) | BGE-m3-ko (dim=1024) / ko-sroberta (dim=768) |
+| 검색 | similarity / MMR / hybrid + multi-query / rerank | 동일 |
+| 생성 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE / Gemma3 / Gemma4 / kanana / Midm 등 로컬 모델 |
+| 대화 메모리 | 슬라이딩 윈도우 (최근 5턴) | 동일 |
+| UI | Streamlit 앱 (사이드바에서 A/B 전환) | 동일 |
 
 핵심 엔트리:
 - `app.py`
 - `src/rag_pipeline.py`
 
 ### B. AutoRAG 실험/배포
-- `qa.parquet`, `corpus.parquet` 생성 자동화
-- AutoRAG 평가/탐색 실행
-- AutoRAG API/Web 실행 스크립트
-- FastAPI/Streamlit 래퍼 앱
+
+| config 파일 | 시나리오 | Generator | 임베딩 |
+|------------|---------|-----------|--------|
+| `configs/autorag/tutorial.yaml` | B (OpenAI) | openai_llm — gpt-5-mini | text-embedding-3-small |
+| `configs/autorag/local.yaml` | A (GPU 서버, 22GB) | vllm — 5종 모델 | BGE-m3-ko + ko-sroberta |
+| `configs/autorag/local_pc.yaml` | A-PC (8GB GPU) | vllm — 4종 모델 | BAAI/bge-m3 + ko-sroberta (HF Hub) |
 
 핵심 엔트리:
 - `scripts/prepare_autorag_data.py`
 - `scripts/run_autorag_optimization.py`
-- `scripts/run_autorag_api.py`
-- `scripts/run_autorag_web.py`
-- `apps/autorag_api.py`
-- `apps/autorag_streamlit.py`
+- `apps/autorag_api.py`, `apps/autorag_streamlit.py`
 
 ### C. 평가 프레임워크 (분리 설계)
 - `core` 모드: 운영 핵심 지표 중심 (빠르고 비용 절감)
@@ -56,6 +60,10 @@
 - `scripts/run_evaluation.py`
 - `scripts/check_release_gate.py`
 - `src/evaluation/*`
+
+### D. 파인튜닝
+- `scripts/finetune_local.py`: LoRA / QLoRA (로컬 오픈소스 모델)
+- `scripts/finetune_openai.py`: OpenAI Fine-tuning API
 
 ---
 
@@ -67,16 +75,19 @@ pip install -r requirements.txt
 
 `requirements.txt`에서 통합 관리하는 주요 패키지:
 - RAG: `openai`, `langchain-text-splitters`, `chromadb`, `faiss-cpu`
-- 평가: `rouge-score`, `nltk`, `bert-score`
-- 평가: `ragas` (Python 버전에 따라 자동 분기)
+- HuggingFace (Scenario A): `transformers`, `sentence-transformers`, `torch`, `accelerate`
+- 평가: `rouge-score`, `nltk`, `bert-score`, `ragas`
 - 서비스: `streamlit`, `fastapi`, `uvicorn`
-- AutoRAG: Python `<3.13`에서 자동 설치, Python `>=3.13`에서는 자동 skip
-- LangChain splitters는 Python 버전에 따라 자동으로 호환 버전이 선택됩니다.
+
+파인튜닝 추가 패키지:
+```bash
+pip install peft trl bitsandbytes accelerate datasets
+```
 
 설치 이슈 메모:
-- `pyhwp`, `python-hwp`는 Python 3.14 환경에서 설치 불가 케이스가 많아 필수 목록에서 제외했습니다.
-- 본 프로젝트의 HWP 파싱은 `olefile` + 내부 파서(`src/document_loader.py`)로 동작합니다.
-- AutoRAG 실행이 필요하면 Python `3.11/3.12` 환경을 권장합니다.
+- HWP 파싱은 `olefile` + 내부 파서(`src/document_loader.py`)로 동작합니다.
+- Scenario A 로컬 모델은 `/srv/shared_data/models/`에서 직접 로드하며 HF_TOKEN이 불필요합니다.
+- 로컬 PC에서는 HuggingFace Hub에서 자동 다운로드됩니다 (`HF_HOME` 환경변수로 캐시 경로 지정 가능).
 
 ---
 
@@ -84,19 +95,82 @@ pip install -r requirements.txt
 
 ### 3-1. 인덱싱
 
+인덱싱은 **청킹 → 임베딩** 2단계로 구성됩니다.
+
+#### Scenario B (OpenAI API)
+
 ```bash
-python scripts/index_documents.py \
-  --scenario B \
-  --method semantic \
-  --chunk-size 800 \
-  --chunk-overlap 200
+# 기본 (chunk_size=1200)
+python scripts/index_documents.py --scenario B --collection rfp_chunk1200
+
+# 비교용 800자 컬렉션
+python scripts/index_documents.py --scenario B --chunk-size 800 --collection rfp_chunk800
+
+# Batch API 사용 (비용 50% 절감)
+python scripts/index_documents.py --scenario B --use-batch-api --collection rfp_chunk1200
+
+# 단계별 실행
+python scripts/index_documents.py --scenario B --step chunk --collection rfp_chunk1200
+python scripts/index_documents.py --scenario B --step embed --collection rfp_chunk1200
 ```
+
+#### Scenario A (로컬 HuggingFace)
+
+```bash
+# 기본 (BGE-m3-ko 임베딩, chunk_size=1200)
+python scripts/index_documents.py \
+  --scenario A \
+  --hf-embedding-model bge \
+  --chunk-size 1200 \
+  --collection rfp_chunk1200_a
+
+# 비교용 — ko-sroberta 임베딩 (경량, dim=768)
+python scripts/index_documents.py \
+  --scenario A \
+  --hf-embedding-model sroberta \
+  --chunk-size 1200 \
+  --collection rfp_chunk1200_a_sroberta
+
+# B안 청킹 파일 재사용 → A안 임베딩만 실행
+python scripts/index_documents.py \
+  --scenario A --step embed \
+  --hf-embedding-model bge \
+  --collection rfp_chunk1200_a
+```
+
+#### 컬렉션 목록
+
+| 컬렉션명 | 시나리오 | 임베딩 | chunk_size |
+|---------|---------|--------|-----------|
+| `rfp_chunk1200` | B (OpenAI) | text-embedding-3-small (512) | 1200 |
+| `rfp_chunk800` | B (OpenAI) | text-embedding-3-small (512) | 800 |
+| `rfp_chunk1200_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 1200 |
+| `rfp_chunk800_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 800 |
+| `rfp_chunk1200_a_sroberta` | A (ko-sroberta) | ko-sroberta (768) | 1200 |
+
+> A안과 B안은 임베딩 차원이 달라 컬렉션을 반드시 분리해야 합니다.
+
+---
 
 ### 3-2. 서비스 앱 실행
 
 ```bash
 streamlit run app.py
 ```
+
+#### 사이드바 주요 설정
+
+| 설정 | Scenario B (OpenAI) | Scenario A (로컬 HF) |
+|------|--------------------|--------------------|
+| 실행 모드 | B: OpenAI API | A: 로컬 HuggingFace |
+| 컬렉션 | rfp_chunk1200 / rfp_chunk800 | rfp_chunk1200_a / rfp_chunk1200_a_sroberta |
+| LLM 모델 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE / Gemma3 / Gemma4 등 9종 |
+| 임베딩 모델 | text-embedding-3-small (고정) | BGE-m3-ko / ko-sroberta 선택 |
+| 검색 방식 | similarity / mmr / hybrid | 동일 |
+| Reasoning Effort | low / medium / high | 해당 없음 |
+| Temperature | 미지원 (gpt-5 계열) | 0.0 ~ 1.0 슬라이더 |
+
+> 실행 모드를 전환하면 컬렉션 목록이 자동으로 해당 시나리오 컬렉션으로 바뀝니다.
 
 ---
 
@@ -110,12 +184,15 @@ python scripts/prepare_autorag_data.py \
   --metadata-csv data/data_list.csv \
   --output-dir data/autorag \
   --chunk-method semantic \
-  --chunk-size 800 \
-  --chunk-overlap 200
+  --chunk-size 600 \
+  --chunk-overlap 150
 ```
+
+산출물: `data/autorag/corpus.parquet`, `data/autorag/qa.parquet`
 
 ### 4-2. AutoRAG 최적화
 
+**Scenario B (OpenAI)**
 ```bash
 python scripts/run_autorag_optimization.py \
   --qa-path data/autorag/qa.parquet \
@@ -124,45 +201,101 @@ python scripts/run_autorag_optimization.py \
   --project-dir evaluation/autorag_benchmark
 ```
 
-### 4-3. AutoRAG 배포 실행
-
+**Scenario A — GPU 서버 (22GB VRAM)** — 실행 전 `nvidia-smi`로 GPU 점유 확인 권장
 ```bash
-autorag run_api --trial_dir evaluation/autorag_benchmark/0 --host 0.0.0.0 --port 8000
-autorag run_web --trial_path evaluation/autorag_benchmark/0
+python scripts/run_autorag_optimization.py \
+  --qa-path data/autorag/qa.parquet \
+  --corpus-path data/autorag/corpus.parquet \
+  --config-path configs/autorag/local.yaml \
+  --project-dir evaluation/autorag_benchmark_local
 ```
 
-보조 스크립트:
+**Scenario A-PC — 로컬 PC (RTX 4070 / 3060Ti, 8GB VRAM)**
 ```bash
-python scripts/run_autorag_api.py --trial-dir evaluation/autorag_benchmark/0
-python scripts/run_autorag_web.py --trial-path evaluation/autorag_benchmark/0
+# 첫 실행 시 HuggingFace에서 모델 자동 다운로드 (수 GB)
+python scripts/run_autorag_optimization.py \
+  --qa-path data/autorag/qa.parquet \
+  --corpus-path data/autorag/corpus.parquet \
+  --config-path configs/autorag/local_pc.yaml \
+  --project-dir evaluation/autorag_benchmark_pc
+```
+
+> **AutoRAG 0.3.22 노드명 변경**: 구버전의 `node_type: retrieval` 단일 노드는 지원 종료.  
+> `lexical_retrieval` / `semantic_retrieval` / `hybrid_retrieval` 로 분리해서 사용해야 합니다.
+>
+> **내장 패치** (`run_autorag_optimization.py`):
+> - ChromaDB `add_embedding` batch 초과 자동 분할 처리 (11567 > 5461 오류 방지)
+> - ChromaDB `is_exist` SQLite 변수 초과 자동 분할 처리 (500개 단위)
+> - 각 모델 평가 후 VRAM 자동 해제 (`gc.collect` + `cuda.empty_cache`)
+> - 위 패치는 `tutorial.yaml`, `local.yaml`, `local_pc.yaml` 모두에 자동 적용됨
+
+### 4-3. AutoRAG 결과 확인
+
+```bash
+# 요약 CSV
+cat evaluation/autorag_benchmark_local/0/summary.csv
+
+# 대시보드 (시각화)
+autorag dashboard --trial_dir evaluation/autorag_benchmark_local/0
+
+# 최적 config 추출
+autorag extract_best_config \
+  --trial_path evaluation/autorag_benchmark_local/0 \
+  --output_path evaluation/autorag_benchmark_local/best_config.yaml
+
+# API 서빙
+autorag run_api --trial_dir evaluation/autorag_benchmark_local/0 --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-## 5) 평가 실행 가이드
+## 5) 파인튜닝
 
-## 5-1. core 모드 (운영 권장)
-- 목적: 빠른 품질 모니터링 / 회귀 체크
-- 기본: LLM Judge OFF, BERTScore OFF
-- 기본: Gate ON (`--gate auto`)
+### 5-1. 로컬 LoRA/QLoRA
+
+```bash
+# GPU 서버 — LoRA
+python scripts/finetune_local.py \
+  --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
+  --output-dir models/finetuned/kanana-nano-rag \
+  --epochs 3
+
+# 로컬 PC (8GB GPU) — QLoRA (4-bit 양자화)
+python scripts/finetune_local.py \
+  --model-path kakaocorp/kanana-nano-2.1b \
+  --output-dir models/finetuned/kanana-nano-rag \
+  --qlora \
+  --epochs 3
+```
+
+### 5-2. OpenAI Fine-tuning
+
+```bash
+# 시작 (데이터 자동 생성 + 업로드)
+python scripts/finetune_openai.py start \
+  --model gpt-4o-mini-2024-07-18 \
+  --output-dir models/finetuned/openai
+
+# 상태 확인
+python scripts/finetune_openai.py status --job-id ftjob-xxxx
+
+# 목록
+python scripts/finetune_openai.py list
+```
+
+완료 후 `configs/autorag/tutorial.yaml`의 `llm`을 파인튜닝 모델 ID로 교체:
+```yaml
+llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
+```
+
+---
+
+## 6) 평가 실행 가이드
+
+### core 모드 (운영 권장)
 
 ```bash
 python scripts/run_evaluation.py --mode core --output-dir evaluation
-```
-
-생성 파일 예시:
-- `evaluation/eval_similarity_k5_core.csv` (핵심 컬럼만)
-- `evaluation/summary_similarity_k5_core.json`
-- `evaluation/gate_report_core.json`
-- `evaluation/gate_report_core.md`
-
-커스텀 Gate 기준 적용:
-```bash
-python scripts/run_evaluation.py \
-  --mode core \
-  --gate on \
-  --gate-thresholds configs/evaluation/core_gate.default.json \
-  --output-dir evaluation
 ```
 
 릴리즈 게이트 원커맨드:
@@ -170,19 +303,13 @@ python scripts/run_evaluation.py \
 python scripts/check_release_gate.py
 ```
 
-## 5-2. detailed 모드 (튜닝/실험)
-- 목적: 모델/프롬프트/검색 전략 튜닝
-- 기본: LLM Judge ON, BERTScore ON
+### detailed 모드 (튜닝/실험)
 
 ```bash
 python scripts/run_evaluation.py --mode detailed --output-dir evaluation
 ```
 
-생성 파일 예시:
-- `evaluation/eval_similarity_k5_detailed.csv` (상세 지표 포함)
-- `evaluation/summary_similarity_k5_detailed.json`
-
-## 5-3. 빠른 테스트
+### 빠른 테스트
 
 ```bash
 python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir evaluation
@@ -190,82 +317,78 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 
 ---
 
-## 6) 평가 지표 정의
+## 7) 평가 지표 정의
 
-### 6-1. Retrieval
-- `hit_at_1/3/5`
-- `mrr`
-- `ndcg_at_5`
-- `precision_at_5`
-- `recall_proxy`
+### Retrieval
+- `hit_at_1/3/5`, `mrr`, `ndcg_at_5`, `precision_at_5`, `recall_proxy`
 
-### 6-2. Generation
-- `keyword_recall`
-- `field_coverage`
-- `rougeL_f1`
-- `meteor`
-- `bertscore_f1` (detailed 중심)
+### Generation
+- `keyword_recall`, `field_coverage`, `rougeL_f1`, `meteor`, `bertscore_f1`
 
-### 6-3. Grounding / 신뢰성
-- `grounded_token_ratio`
-- `hallucination_risk_proxy`
-- `decline_accuracy` (out-of-scope 대응)
+### Grounding / 신뢰성
+- `grounded_token_ratio`, `hallucination_risk_proxy`, `decline_accuracy`
 
-### 6-4. Runtime / 비용
-- `avg/p50/p95 elapsed_time`
-- `prompt/completion/total_tokens`
+### Runtime / 비용
+- `avg/p50/p95 elapsed_time`, `prompt/completion/total_tokens`
 
 ---
 
-## 7) 보고서 작성 템플릿 (권장)
+## 8) Scenario A 로컬 모델 목록
 
-### 7-1. 목표/가정
-- 대상 사용자: 입찰 컨설턴트
-- 핵심 요구: 정확성 + 속도 + 비용 균형
+모델 저장 위치 (서버): `/srv/shared_data/models/`  
+로컬 PC: HuggingFace Hub 자동 다운로드
 
-### 7-2. 실험 설정
-- 비교군: similarity/MMR/hybrid, top_k
-- 모드: core / detailed
-- 질문셋: 단일문서/다중문서/후속질문/out-of-scope
+### 임베딩 모델
 
-### 7-3. 결과 표 (예시)
-- 운영 관점: `p95`, `hit@5`, `field_coverage`, `grounded_token_ratio`
-- 튜닝 관점: `bertscore_f1`, `llm_*`, `rougeL_f1`, `meteor`
+| CLI 옵션 | 서버 경로 / HF Hub ID | 차원 | 특징 |
+|---------|----------------------|------|------|
+| `--hf-embedding-model bge` | `BGE-m3-ko` / `BAAI/bge-m3` | 1024 | 다국어, 고성능 |
+| `--hf-embedding-model sroberta` | `ko-sroberta-multitask` / `jhgan/ko-sroberta-multitask` | 768 | 한국어 특화, 경량 |
 
-### 7-4. 의사결정
-- 운영 기본값: core 기준 최적 config
-- 튜닝/개선 트랙: detailed 기준 개선 후보
+### AutoRAG 평가 모델 (Scenario A — 서버, `local.yaml`)
 
-### 7-5. 한계/개선
-- HWP 파싱 정확도 개선
-- 메타데이터 필터 정교화
-- 재랭킹 비용 최적화
+| 모델명 | 크기 | 특이사항 |
+|--------|------|---------|
+| EXAONE-4.0-1.2B | 2.4G | trust_remote_code 필요 |
+| kanana-nano-2.1b | 4.0G | llama 계열, 한국어 특화 |
+| kanana-1.5-2.1b | 4.4G | llama 계열, 한국어 특화 |
+| Midm-2.0-Mini | 4.4G | llama 계열, 한국어 특화 |
+| Gemma3-4B | 8.1G | 순차 로드 (이전 모델 VRAM 해제 후) |
+
+> Gemma4-E4B(15G)는 fp8 KV 캐시 적용 시 22GB GPU에서 로드 가능 — 필요 시 `local.yaml`에 추가 가능.  
+> Gemma4-26B-A4B(49G)는 22GB VRAM 초과로 단일 GPU 로드 불가.
+
+### AutoRAG 평가 모델 (Scenario A-PC — 8GB GPU)
+
+| HF Hub ID | 크기 | 비고 |
+|-----------|------|------|
+| `LGAI-EXAONE/EXAONE-4.0-1.2B` | 2.4G | trust_remote_code 필요 |
+| `kakaocorp/kanana-nano-2.1b` | 4.0G | |
+| `kakaocorp/kanana-1.5-2.1b` | 4.4G | |
+| `skt/Midm-2.0-Mini-Instruct` | 4.4G | |
+
+### 채팅 모델 (앱 사이드바 선택, 서버)
+
+| 모델명 | 경로 | 크기 | VRAM 적합성 | 특징 |
+|--------|------|------|------------|------|
+| EXAONE-4.0-1.2B | `exaone/EXAONE-4.0-1.2B` | 2.4G | ✅ | 가장 빠름, 테스트 용도 |
+| EXAONE-Deep-2.4B | `exaone/EXAONE-Deep-2.4B` | 4.5G | ✅ | 속도/성능 균형 |
+| EXAONE-3.5-7.8B | `exaone/EXAONE-3.5-7.8B` | 30G | ✅ (22GB 서버) | 한국어 고성능 |
+| EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ | 한국어 추론 특화 |
+| Gemma3-4B | `gemma/Gemma3-4B` | 8.1G | ✅ | 다국어 |
+| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ⚠️ (fp8 필요) | 멀티모달, 다국어 |
+| Gemma4-26B-A4B | `gemma/Gemma4-26B-A4B` | 49G | ❌ (22GB 초과) | MoE 26B/4B활성 |
+| kanana-nano-2.1b | `kanana/kanana-nano-2.1b` | 4.0G | ✅ | 한국어 특화, 경량 |
+| kanana-1.5-2.1b | `kanana/kanana-1.5-2.1b` | 4.4G | ✅ | 한국어 특화, 경량 |
+| Midm-2.0-Mini | `midm/Midm-2.0-Mini` | 4.4G | ✅ | 한국어 특화, 경량 |
+
+> 모두 `/srv/shared_data/models/` 하위 경로.
 
 ---
 
-## 8) 운영 체크리스트
+## 9) OpenAI 모델 최적화 설정 (Scenario B)
 
-- `.env`/키 노출 금지
-- 인덱싱 재실행 시 컬렉션 중복 적재 여부 점검
-- 멀티 사용자 환경에서 세션 메모리 분리 유지
-- 배포 전 `--mode core --test-limit N`으로 회귀 테스트
-
----
-
-## 9) 현재 구조 요약
-
-- `src/evaluation/`: 평가 모듈 분리 구조
-- `src/evaluator.py`: 하위호환 re-export
-- `requirements.txt`: AutoRAG/평가/서빙 패키지 통합 관리
-
----
-
-## 10) OpenAI 모델 최적화 설정
-
-### 10-1. Reasoning Effort (응답 속도/비용 조절)
-
-gpt-5 계열 reasoning 모델은 내부 추론 깊이를 조절할 수 있습니다.  
-앱 사이드바 **Reasoning Effort** 슬라이더 또는 `config.py`에서 설정합니다.
+### Reasoning Effort
 
 | 값 | 용도 | 속도 | 비용 |
 |----|------|------|------|
@@ -273,189 +396,52 @@ gpt-5 계열 reasoning 모델은 내부 추론 깊이를 조절할 수 있습니
 | `medium` | 일반 질문 (기본값) | 보통 | 보통 |
 | `high` | 복잡한 비교/분석 | 느림 | 비쌈 |
 
-```python
-# configs/config.py
-reasoning_effort: str = "medium"
-```
+### gpt-5 계열 파라미터 제한사항
 
-### 10-2. 자동 모델 라우팅
+| 파라미터 | gpt-4 계열 | gpt-5 계열 |
+|---------|-----------|-----------|
+| `temperature` | 지원 | **미지원** (Scenario A 전용) |
+| `max_tokens` | 지원 | **미지원** (`max_completion_tokens` 사용) |
+| `reasoning_effort` | 미지원 | low/medium/high |
 
-쿼리 길이 기준으로 단순 질문은 `gpt-5-nano`, 복잡한 질문은 설정 모델(`gpt-5-mini`)을 자동 선택합니다.  
-앱 사이드바 **자동 모델 라우팅** 체크박스로 제어합니다.
+---
 
-```python
-auto_model_routing: bool = True
-routing_simple_model: str = "gpt-5-nano"   # 단순 질문
-routing_complexity_threshold: int = 50     # 글자 수 기준
-```
+## 10) 운영 체크리스트
 
-### 10-3. 임베딩 차원 축소
-
-`text-embedding-3-small`은 출력 차원을 줄여도 품질 저하가 적습니다.  
-기본값 512 (원본 1536 대비 저장 공간 67% 절감, 검색 속도 향상).
-
-```python
-openai_embedding_dim: int = 512  # 축소 (원본: 1536)
-```
-
-> **주의**: 차원을 변경한 경우 기존 벡터DB와 호환되지 않으므로 재인덱싱 필요.
-> ```bash
-> python scripts/index_documents.py --collection rfp_chunk1200
-> ```
-
-### 10-4. Batch API (대용량 인덱싱 비용 50% 절감)
-
-500개 이상 청크 인덱싱 시 OpenAI Batch API를 사용하면 비용이 절반으로 줄어듭니다.  
-처리 시간이 수 분~수 시간 소요될 수 있으므로 최초 인덱싱 또는 재인덱싱 시 사용을 권장합니다.
-
-```bash
-python scripts/index_documents.py --use-batch-api --collection rfp_chunk1200
-```
-
-### 10-5. Scenario A (HuggingFace) 모델 학습/파인튜닝
-
-모델 자체를 학습시키거나 파인튜닝하는 작업은 **Scenario A (HuggingFace)** 기반입니다.  
-GCP VM에서 GPU를 활용해 도메인 특화 학습을 진행합니다.
-
-| 항목 | 내용 |
-|------|------|
-| 기반 모델 | `google/gemma-3-4b-it` |
-| 임베딩 모델 | `intfloat/multilingual-e5-large` |
-| 학습 방법 | LoRA / QLoRA (PEFT) 권장 |
-| 학습 데이터 | `data/` 내 RFP 문서 + 정제된 QA 쌍 |
-| 실행 환경 | GCP VM (CUDA), conda 환경 |
-
-파인튜닝 후 `config.py`의 `hf_chat_model` 경로를 학습된 체크포인트로 변경하면 적용됩니다.
+- `.env` / API 키 노출 금지
+- A안/B안 컬렉션 혼용 금지 (임베딩 차원 불일치로 검색 오류 발생)
+- 인덱싱 재실행 시 컬렉션 중복 적재 여부 점검
+- 배포 전 `--mode core --test-limit N`으로 회귀 테스트
+- AutoRAG 실행 전 `nvidia-smi`로 다른 팀원 GPU 점유 확인
 
 ---
 
 ## 11) 트러블슈팅
 
-### 11-1. UnicodeEncodeError: surrogates not allowed
+### UnicodeEncodeError: surrogates not allowed
+HWP 파싱 중 유효하지 않은 유니코드 서로게이트 발생.  
+`_sanitize()` 함수가 청킹 및 ChromaDB 저장 시 자동 정제합니다.
 
-**증상**
-```
-UnicodeEncodeError: 'utf-8' codec can't encode characters: surrogates not allowed
-```
+### AutoRAG `KeyError: retrieval is not supported`
+AutoRAG 0.3.22에서 `node_type: retrieval` 노드명 변경.  
+`lexical_retrieval` / `semantic_retrieval` / `hybrid_retrieval` 로 분리해서 사용해야 합니다.
 
-**원인**  
-HWP 바이너리 파싱 중 일부 바이트가 유효하지 않은 유니코드 서로게이트(`\uD800`~`\uDFFF`)로 잘못 디코딩됨.  
-OpenAI 임베딩 API 및 ChromaDB 저장 시 모두 오류 발생.
+### openai.BadRequestError: max_tokens not supported
+gpt-5 계열은 `max_tokens` 대신 `max_completion_tokens` 사용.  
+`src/evaluation/evaluator.py`, `src/generator.py` 에서 이미 적용됨.
 
-**해결**  
-`src/embedder.py`에 모듈 레벨 `_sanitize()` 함수 추가. 청킹 직후(`scripts/index_documents.py`) 및 ChromaDB 저장(`src/embedder.py`) 시 텍스트와 메타데이터 전체에 정제 적용.
+### ChromaDB batch size 초과 (11567 > 5461)
+`run_autorag_optimization.py` 내장 패치로 자동 처리됨.
 
-```python
-def _sanitize(text: str) -> str:
-    return text.encode("utf-8", errors="ignore").decode("utf-8")
-```
+### ChromaDB is_exist SQLite 변수 초과
+`run_autorag_optimization.py` 내장 패치로 자동 처리됨 (500개 단위 배치).
 
----
+### vLLM max_model_len 초과
+`max_model_len` 미지정 시 각 모델의 `config.json`에서 자동 참조됨.  
+`local.yaml`, `local_pc.yaml` 모두 `max_model_len` 미지정으로 설정되어 있음.
 
-### 11-2. openai.PermissionDeniedError: model not found (403)
-
-**증상**
-```
-openai.PermissionDeniedError: Error code: 403
-Project does not have access to model `text-embedding-3-small`
-```
-
-**원인**  
-`.env`의 `OPENAI_API_KEY`가 해당 모델 접근 권한이 없는 프로젝트 소속 키임.
-
-**해결**  
-OpenAI 플랫폼 → 해당 프로젝트 → Settings → Model access 에서 `text-embedding-3-small` 활성화 확인.  
-또는 `python scripts/check_env.py` 실행으로 현재 키로 접근 가능한 모델 목록 확인.
-
----
-
-### 11-3. openai.BadRequestError: max_tokens not supported (400)
-
-**증상**
-```
-BadRequestError: 'max_tokens' is not supported with this model.
-Use 'max_completion_tokens' instead.
-```
-
-**원인**  
-gpt-5 계열 모델은 `max_tokens` 파라미터를 지원하지 않음.
-
-**해결**  
-`src/generator.py` 및 `src/retriever.py`에서 `max_tokens` → `max_completion_tokens` 로 변경.
-
----
-
-### 11-4. openai.BadRequestError: temperature not supported (400)
-
-**증상**
-```
-BadRequestError: 'temperature' does not support 0.1 with this model.
-Only the default (1) value is supported.
-```
-
-**원인**  
-gpt-5 계열 reasoning 모델은 `temperature`, `top_p` 파라미터를 지원하지 않음.
-
-**해결**  
-`src/generator.py`의 `_call_openai()`에서 `temperature`, `top_p` 제거.  
-`src/retriever.py`의 `_generate_multi_queries()`에서 모델명 기준으로 조건부 적용.  
-해당 파라미터는 Scenario A (HuggingFace) 전용으로 유지.
-
----
-
-### 11-5. gpt-5 응답 텍스트가 빈 문자열로 반환
-
-**증상**  
-앱 화면에 답변 텍스트가 나타나지 않음. usage 확인 시 `completion_tokens`가 `max_completion_tokens` 한도와 동일.
-
-**원인**  
-gpt-5-mini는 reasoning 모델로 내부 추론 토큰을 먼저 소비함. `max_completion_tokens=2048`이 너무 낮아 추론만 하다가 실제 응답 출력 전에 한도 도달.
-
-**해결**  
-`configs/config.py`에서 `max_tokens` 값을 충분히 크게 설정.
-
-```python
-max_tokens: int = 16000  # reasoning 모델은 내부 추론 토큰 포함으로 충분히 크게 설정
-```
-
----
-
-### 11-6. AutoRAG 의존성 충돌 (langchain-text-splitters 버전)
-
-**증상**
-```
-ERROR: Cannot install langchain-community and langchain-text-splitters>=1.1.1
-because these package versions have conflicting dependencies.
-```
-
-**원인**  
-`AutoRAG==0.3.21` → `langchain-community==0.2.19` → `langchain-text-splitters<0.3.0` 요구,  
-메인 프로젝트는 `langchain-text-splitters>=1.1.1` 요구. 동일 환경에서 공존 불가.
-
-**해결**  
-AutoRAG를 별도 conda 환경(`autorag`)으로 분리.  
-`requirements-autorag.txt` 생성, `openai>=1.40.0,<2.0.0` 고정.  
-각 AutoRAG 스크립트(`scripts/run_autorag_*.py`) 상단에 `.env`의 `AUTORAG_PYTHON` 경로로 자동 인터프리터 전환 로직 추가.
-
-```bash
-# autorag 환경 생성
-conda create -n autorag python=3.11
-conda activate autorag
-pip install -r requirements-autorag.txt
-
-# .env 설정
-AUTORAG_PYTHON=/path/to/envs/autorag/bin/python
-```
-
----
-
-### 11-7. 환경 진단
-
-실행 전 아래 스크립트로 전체 환경을 점검할 수 있습니다.
+### 환경 진단
 
 ```bash
 python scripts/check_env.py
 ```
-
-확인 항목: API 키 로드 여부, OpenAI 모델 접근 권한, 데이터 폴더 존재 여부, 핵심 패키지 설치 상태.
-

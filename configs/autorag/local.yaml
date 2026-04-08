@@ -1,0 +1,214 @@
+# ============================================================
+# AutoRAG 0.3.22 - Scenario A (로컬 HuggingFace 모델 전용)
+#
+# 사용 모델 (vLLM으로 직접 로드):
+#   /srv/shared_data/models/exaone/EXAONE-4.0-1.2B   (2.4G, 빠름)
+#   /srv/shared_data/models/kanana/kanana-nano-2.1b   (4.0G, 한국어 특화)
+#   /srv/shared_data/models/kanana/kanana-1.5-2.1b    (4.4G, 한국어 특화)
+#   /srv/shared_data/models/midm/Midm-2.0-Mini        (4.4G, 한국어 특화)
+#   /srv/shared_data/models/gemma/Gemma3-4B           (8.1G, 순차 로드)
+#   /srv/shared_data/models/gemma/Gemma4-26B-A4B      (49G→4bit≈16G, bitsandbytes)
+#
+# 모델별 공식 권장 샘플링 파라미터 (generation_config.json 기준):
+#   EXAONE-4.0-1.2B : temperature=0.1 (한국어 1.2B code switching 방지, LG AI 공식)
+#                     non-reasoning: temp<0.6 / reasoning: temp=0.6, top_p=0.95
+#   kanana          : greedy 권장 (do_sample=False, Kakao 공식), temperature=0.1
+#   Midm-2.0-Mini   : temperature=0.8, top_k=20, top_p=0.75 (KT K-intelligence 공식)
+#   Gemma3-4B       : temperature=1.0, top_k=64, top_p=0.95  ← Google 권장
+#   Gemma4-26B-A4B  : temperature=1.0, top_k=64, top_p=0.95  ← Google 권장
+#
+# 실행 명령어:
+#   python scripts/run_autorag_optimization.py \
+#     --qa-path data/autorag/qa.parquet \
+#     --corpus-path data/autorag/corpus.parquet \
+#     --config-path configs/autorag/local.yaml \
+#     --project-dir evaluation/autorag_benchmark_local
+#
+# 주의:
+#   - 실행 전 nvidia-smi로 GPU 점유 확인 권장
+#   - gpu_memory_utilization: 0.70 → 15.4GB 예약 (22GB GPU 기준)
+#   - max_model_len 미지정 → 각 모델의 max_position_embeddings 자동 사용
+#   - kv_cache_dtype: auto → 모델 dtype(bfloat16) 자동 사용 (fp8 재활성화: CUDA_HOME 설정 후 fp8로 변경)
+#   - Gemma4-26B-A4B: quantization/load_format: bitsandbytes → 4-bit 즉시 적재 (~16GB)
+#   - 각 모델 평가 후 VRAM 자동 해제 (run_autorag_optimization.py 패치)
+#   - kanana/midm (llama 계열): trust_remote_code 불필요
+#   - EXAONE: trust_remote_code: true 필요
+# ============================================================
+
+# ── 벡터DB: 로컬 임베딩 모델 2종 비교 ──────────────────────────────────────
+vectordb:
+  - name: local_bge
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: /srv/shared_data/models/embeddings/BGE-m3-ko
+    collection_name: autorag_local_bge
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 50
+
+  - name: local_sroberta
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: /srv/shared_data/models/embeddings/ko-sroberta-multitask
+    collection_name: autorag_local_sroberta
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 50
+
+node_lines:
+  - node_line_name: retrieve_node_line
+    nodes:
+      - node_type: lexical_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 64
+        modules:
+          - module_type: bm25
+            top_k: [2, 4, 8, 16, 32, 64]
+
+      - node_type: semantic_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 64
+        modules:
+          - module_type: vectordb
+            vectordb: local_bge
+            top_k: [2, 4, 8, 16, 32, 64]
+          - module_type: vectordb
+            vectordb: local_sroberta
+            top_k: [2, 4, 8, 16, 32, 64]
+
+      - node_type: hybrid_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 64
+        modules:
+          - module_type: hybrid_rrf
+            top_k: [2, 4, 8, 16, 32, 64]
+          - module_type: hybrid_cc
+            top_k: [2, 4, 8, 16, 32, 64]
+            normalize_method: [mm, tmm]
+
+  - node_line_name: post_retrieve_node_line
+    nodes:
+      - node_type: prompt_maker
+        strategy:
+          metrics:
+            - metric_name: meteor
+            - metric_name: rouge
+          generator_modules:
+            # prompt_maker 평가용: EXAONE-4.0-1.2B (빠름)
+            - module_type: vllm
+              llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+              max_tokens: 256
+              temperature: 0.1          # 한국어 RAG 권장 (code switching 방지)
+              gpu_memory_utilization: 0.70
+              kv_cache_dtype: auto
+              trust_remote_code: true
+        modules:
+          - module_type: fstring
+            prompt:
+              - |
+                다음 문서를 참고하여 질문에 한국어로 답변하세요.
+                질문: {query}
+                참고 문서: {retrieved_contents}
+                답변:
+              - |
+                다음 문서를 참고하여 질문에 한국어로 간결하게 답변하세요.
+                핵심 요구사항과 조건을 중심으로 작성하세요.
+                질문: {query}
+                참고 문서: {retrieved_contents}
+                답변:
+
+      - node_type: generator
+        strategy:
+          metrics:
+            - metric_name: meteor
+            - metric_name: rouge
+        modules:
+          # ── EXAONE-4.0-1.2B (2.4G) ───────────────────────────────────
+          # temperature: 0.1~0.3 (0.1 간격) — LG AI 권장 범위 (code switching 방지)
+          # top_p: 0.80~0.95 — 그리드 서치
+          # max_tokens: 2048 — 생성 토큰 최대화 (모델 context 한도 내 자동 제한)
+          - module_type: vllm
+            llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+            max_tokens: 2048
+            temperature: [0.1, 0.2, 0.3]
+            top_p: [0.80, 0.90, 0.95]
+            gpu_memory_utilization: 0.70
+            kv_cache_dtype: auto
+            trust_remote_code: true
+
+          # ── kanana-nano-2.1b (4.0G) ──────────────────────────────────
+          # temperature: 0.1~0.3 (Kakao 공식 greedy 기준, 상향 비교)
+          # top_p: 0.80~0.95 — 그리드 서치
+          - module_type: vllm
+            llm: /srv/shared_data/models/kanana/kanana-nano-2.1b
+            max_tokens: 2048
+            temperature: [0.1, 0.2, 0.3]
+            top_p: [0.80, 0.90, 0.95]
+            gpu_memory_utilization: 0.70
+            kv_cache_dtype: auto
+
+          # ── kanana-1.5-2.1b (4.4G) ───────────────────────────────────
+          # temperature: 0.1~0.3 (Kakao 공식 greedy 기준, 상향 비교)
+          # top_p: 0.80~0.95 — 그리드 서치
+          - module_type: vllm
+            llm: /srv/shared_data/models/kanana/kanana-1.5-2.1b
+            max_tokens: 2048
+            temperature: [0.1, 0.2, 0.3]
+            top_p: [0.80, 0.90, 0.95]
+            gpu_memory_utilization: 0.70
+            kv_cache_dtype: auto
+
+          # ── Midm-2.0-Mini (4.4G) ─────────────────────────────────────
+          # temperature: 0.7~0.9 (KT 공식 0.8 중심, ±0.1 비교)
+          # top_k: 20 (KT 공식 고정)
+          # top_p: 0.80~0.95 (KT 공식 0.75 대비 상향 비교)
+          - module_type: vllm
+            llm: /srv/shared_data/models/midm/Midm-2.0-Mini
+            max_tokens: 2048
+            temperature: [0.7, 0.8, 0.9]
+            top_k: 20
+            top_p: [0.80, 0.90, 0.95]
+            gpu_memory_utilization: 0.70
+            kv_cache_dtype: auto
+
+          # ── Gemma3-4B (8.1G) ─────────────────────────────────────────
+          # temperature: 0.9~1.0 (Google 공식 1.0 중심)
+          # top_k: 64 (Google 공식 고정)
+          # top_p: 0.90~0.95 (Google 공식 0.95 중심)
+          - module_type: vllm
+            llm: /srv/shared_data/models/gemma/Gemma3-4B
+            max_tokens: 2048
+            temperature: [0.9, 1.0]
+            top_k: 64
+            top_p: [0.90, 0.95]
+            gpu_memory_utilization: 0.70
+            kv_cache_dtype: auto
+
+          # ── Gemma4-26B-A4B (49G→bitsandbytes 4bit≈16G) ──────────────
+          # temperature: 0.9~1.0 (Google 공식 1.0 중심)
+          # top_k: 64 (Google 공식 고정)
+          # top_p: 0.90~0.95 (Google 공식 0.95 중심)
+          # [공유 GPU 대비]
+          #   4-bit 가중치 ~16GB → GPU 단독 점유 시에만 안전
+          #   gpu_memory_utilization: 0.80 → 22GB × 0.80 ≈ 17.6GB (가중치 16G + KV ~1.6G)
+          #   0.70 이하 불가: 22GB × 0.70 = 15.4GB < 모델 가중치 16GB
+          #   enforce_eager + max_model_len: 4096 → KV 캐시 최소화
+          #   팀원 GPU 사용 중이면 이 모델은 OOM 가능 → nvidia-smi 확인 후 실행 권장
+          - module_type: vllm
+            llm: /srv/shared_data/models/gemma/Gemma4-26B-A4B
+            max_tokens: 2048
+            temperature: [0.9, 1.0]
+            top_k: 64
+            top_p: [0.90, 0.95]
+            gpu_memory_utilization: 0.80
+            enforce_eager: true
+            max_model_len: 4096
+            quantization: bitsandbytes
+            load_format: bitsandbytes

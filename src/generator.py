@@ -77,6 +77,19 @@ class RAGGenerator:
         self._llm_client = None
         self.last_usage: dict | None = None
 
+    @staticmethod
+    def _resolve_device() -> str:
+        """cuda → mps → cpu 순서로 사용 가능한 디바이스를 감지한다."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+            if torch.backends.mps.is_available():
+                return "mps"
+        except Exception:
+            pass
+        return "cpu"
+
     def _get_llm_client(self):
         if self._llm_client is not None:
             return self._llm_client
@@ -86,22 +99,57 @@ class RAGGenerator:
 
             self._llm_client = OpenAI(api_key=self.config.openai_api_key)
         else:
-            self._llm_client = self._init_hf_pipeline()
+            self._llm_client = self._init_hf_model()
 
         return self._llm_client
 
-    def _init_hf_pipeline(self):
-        if not self.config.hf_token:
-            raise ValueError("HF_TOKEN is not set. .env 파일에 HF_TOKEN을 추가하세요.")
-        import huggingface_hub
-        from transformers import pipeline
-        huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
-        return pipeline(
-            "text-generation",
-            model=self.config.hf_chat_model,
-            device_map="auto",
-            max_new_tokens=self.config.max_tokens,
+    def _init_hf_model(self):
+        """AutoModelForCausalLM + AutoTokenizer로 로컬 또는 Hub 채팅 모델을 로드한다.
+
+        /srv/shared_data/models/ 의 로컬 모델은 HF_TOKEN 없이 로드 가능.
+        HuggingFace Hub 비공개 모델을 사용할 경우 .env에 HF_TOKEN을 설정한다.
+        """
+        import torch
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+
+        # 로컬 경로 모델은 HF 토큰 불필요; Hub 비공개 모델일 때만 로그인
+        if self.config.hf_token:
+            import huggingface_hub
+            huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
+
+        device = self._resolve_device()
+        print(f"[Scenario A] 사용 디바이스: {device}")
+        print(f"[Scenario A] 채팅 모델 로드: {self.config.hf_chat_model}")
+
+        tok_kwargs: dict = {}
+        if self.config.hf_token:
+            tok_kwargs["token"] = self.config.hf_token
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.config.hf_chat_model,
+            **tok_kwargs,
         )
+
+        load_kwargs: dict = {"torch_dtype": torch.bfloat16}
+        if self.config.hf_token:
+            load_kwargs["token"] = self.config.hf_token
+        if device == "cpu":
+            load_kwargs["device_map"] = "cpu"
+        else:
+            load_kwargs["device_map"] = "auto"
+
+        if getattr(self.config, "hf_load_in_4bit", False):
+            from transformers import BitsAndBytesConfig
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
+            load_kwargs.pop("torch_dtype", None)  # 4-bit와 dtype 동시 지정 불가
+
+        model = AutoModelForCausalLM.from_pretrained(
+            self.config.hf_chat_model,
+            **load_kwargs,
+        )
+        model.eval()
+        print(f"[Scenario A] 모델 로드 완료: {self.config.hf_chat_model}")
+        return tokenizer, model
 
     def _build_context(self, retrieved_docs: list[dict]) -> str:
         context_parts = []
@@ -174,7 +222,7 @@ class RAGGenerator:
 
         if self.config.scenario == "B":
             return self._call_openai(client, user_prompt, stream, query=query)
-        return self._call_hf(client, user_prompt)
+        return self._call_hf(client, user_prompt, query=query)
 
     def _route_model(self, query: str) -> str:
         """쿼리 복잡도에 따라 모델을 자동 선택한다."""
@@ -241,18 +289,39 @@ class RAGGenerator:
 
         return content, usage
 
-    def _call_hf(self, pipeline, user_prompt: str) -> tuple[str, dict | None]:
-        full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-        result = pipeline(
-            full_prompt,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            do_sample=True,
-        )
-        generated = result[0]["generated_text"]
-        if full_prompt in generated:
-            generated = generated[len(full_prompt) :].strip()
-        return generated, None
+    def _call_hf(self, client, user_prompt: str, query: str = "") -> tuple[str, dict | None]:
+        """Gemma-3 등 채팅 모델을 apply_chat_template으로 호출한다."""
+        import torch
+
+        tokenizer, model = client
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+        ]
+        # 대화 히스토리 추가 (system 이후, 현재 질문 이전)
+        messages.extend(self.memory.get_messages())
+        messages.append({"role": "user", "content": user_prompt})
+
+        input_ids = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(model.device)
+
+        with torch.no_grad():
+            outputs = model.generate(
+                input_ids,
+                max_new_tokens=getattr(self.config, "hf_max_new_tokens", 1024),
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        # 입력 토큰을 제외한 생성 토큰만 디코딩
+        new_tokens = outputs[0][input_ids.shape[-1]:]
+        response = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        return response, None
 
     def reset_memory(self) -> None:
         self.memory.clear()

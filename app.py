@@ -38,9 +38,18 @@ with st.sidebar:
 
     st.divider()
 
+    if scenario_key == "B":
+        _collections = ["rfp_chunk1200", "rfp_chunk800", "rfp_documents"]
+    else:
+        _collections = [
+            "rfp_chunk1200_a",
+            "rfp_chunk800_a",
+            "rfp_chunk1200_a_sroberta",
+        ]
+
     collection = st.selectbox(
         "컬렉션 (청크 크기)",
-        ["rfp_chunk1200", "rfp_chunk800", "rfp_documents"],
+        _collections,
         index=0,
         help="인덱싱 시 사용한 청크 크기별 컬렉션을 선택합니다.",
     )
@@ -51,14 +60,65 @@ with st.sidebar:
             ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
             index=0,
         )
-        temperature = 0.1   # gpt-5 미지원, 내부적으로만 유지
+        temperature = 0.1       # gpt-5 미지원, 내부적으로만 유지
+        top_p = 0.9             # gpt-5 미지원, 내부적으로만 유지
+        hf_max_new_tokens = 1024
+        hf_load_in_4bit = False
+        hf_embedding_model = "text-embedding-3-small"
+        hf_embedding_dim = 512
     else:
-        model = st.selectbox(
-            "LLM 모델",
-            ["google/gemma-3-4b-it"],
+        # /srv/shared_data/models/ 에 저장된 로컬 모델 목록
+        # 4-bit 양자화가 필수인 모델 (VRAM 22GB 초과)
+        _REQUIRES_4BIT = {
+            "/srv/shared_data/models/gemma/Gemma4-26B-A4B",
+        }
+
+        _LOCAL_CHAT_MODELS = {
+            "EXAONE-4.0-1.2B  (2.4G, 빠름)":          "/srv/shared_data/models/exaone/EXAONE-4.0-1.2B",
+            "EXAONE-Deep-2.4B (4.5G, 균형)":           "/srv/shared_data/models/exaone/EXAONE-Deep-2.4B",
+            "EXAONE-3.5-7.8B  (30G,  고성능)":         "/srv/shared_data/models/exaone/EXAONE-3.5-7.8B",
+            "EXAONE-Deep-7.8B (15G,  고성능)":         "/srv/shared_data/models/exaone/EXAONE-Deep-7.8B",
+            "Gemma3-4B        (8.1G, 다국어)":          "/srv/shared_data/models/gemma/Gemma3-4B",
+            "Gemma4-E4B       (15G,  다국어)":          "/srv/shared_data/models/gemma/Gemma4-E4B",
+            "Gemma4-26B-A4B   (49G→4bit≈16G, 대형)":  "/srv/shared_data/models/gemma/Gemma4-26B-A4B",
+            "kanana-nano-2.1b (4.0G, 경량)":           "/srv/shared_data/models/kanana/kanana-nano-2.1b",
+            "kanana-1.5-2.1b  (4.4G, 경량)":           "/srv/shared_data/models/kanana/kanana-1.5-2.1b",
+            "Midm-2.0-Mini    (4.4G, 경량)":           "/srv/shared_data/models/midm/Midm-2.0-Mini",
+        }
+        model_label = st.selectbox(
+            "LLM 모델 (로컬)",
+            list(_LOCAL_CHAT_MODELS.keys()),
             index=0,
         )
-        temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
+        model = _LOCAL_CHAT_MODELS[model_label]
+        _force_4bit = model in _REQUIRES_4BIT
+
+        _LOCAL_EMB_MODELS = {
+            "BGE-m3-ko        (2.2G, 1024-dim, 한국어 특화)": "/srv/shared_data/models/embeddings/BGE-m3-ko",
+            "ko-sroberta-multitask (846M, 768-dim, 경량)": "/srv/shared_data/models/embeddings/ko-sroberta-multitask",
+        }
+        emb_label = st.selectbox(
+            "임베딩 모델 (로컬)",
+            list(_LOCAL_EMB_MODELS.keys()),
+            index=0,
+        )
+        hf_embedding_model = _LOCAL_EMB_MODELS[emb_label]
+        hf_embedding_dim = 1024 if "BGE" in emb_label else 768
+
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.1, 0.1)
+        top_p = st.slider("Top-P", 0.5, 1.0, 0.9, 0.05,
+                          help="0.8~0.95: 일반 권장. 1.0: 비활성화(greedy 계열 권장)")
+        hf_max_new_tokens = st.slider("최대 생성 토큰", 256, 4096, 1024, 256,
+                                      help="생성할 최대 토큰 수. 높을수록 긴 답변 가능.")
+        if _force_4bit:
+            st.info("Gemma4-26B-A4B는 22GB VRAM에서 4-bit 양자화가 필수입니다.")
+            hf_load_in_4bit = True
+        else:
+            hf_load_in_4bit = st.checkbox(
+                "4-bit 양자화 (bitsandbytes)",
+                value=False,
+                help="VRAM이 부족할 때 사용. bitsandbytes 패키지 및 CUDA 필요.",
+            )
 
     retrieval_method = st.selectbox(
         "검색 방식",
@@ -114,13 +174,17 @@ def _pipeline_signature() -> tuple:
         scenario_key,
         collection,
         model,
+        hf_embedding_model,
         retrieval_method,
         top_k,
         temperature,
+        top_p,
+        hf_max_new_tokens,
         use_reranker,
         use_multi_query,
         reasoning_effort,
         auto_model_routing,
+        hf_load_in_4bit,
     )
 
 
@@ -141,15 +205,18 @@ def _build_config() -> Config:
         base["openai_chat_model"] = model
     else:
         base["hf_chat_model"] = model
+        base["hf_embedding_model"] = hf_embedding_model
+        base["hf_embedding_dim"] = hf_embedding_dim
+        base["hf_load_in_4bit"] = hf_load_in_4bit
+        base["top_p"] = top_p
+        base["hf_max_new_tokens"] = hf_max_new_tokens
     return Config(**base)
 
 
 if scenario_key == "B" and not os.getenv("OPENAI_API_KEY"):
     st.error("OPENAI_API_KEY가 설정되지 않았습니다. `.env`를 확인해 주세요.")
     st.stop()
-if scenario_key == "A" and not os.getenv("HF_TOKEN"):
-    st.error("HF_TOKEN이 설정되지 않았습니다. `.env`를 확인해 주세요.")
-    st.stop()
+# Scenario A: /srv/shared_data/models/ 로컬 모델은 HF_TOKEN 불필요 → 체크 생략
 
 
 try:

@@ -136,6 +136,82 @@ def clean_text(text: str) -> str:
     lines = [line.strip() for line in text.split("\n")]
     return "\n".join(lines).strip()
 
+def apply_filter(text: str) -> str:
+    """단계별 전처리 필터 적용"""
+    text = filter_stage1(text)
+    text = filter_stage2(text)
+    text = filter_stage3(text)
+    return text
+
+def filter_stage1(text: str) -> str:
+    """1차 필터: 기본 줄 정리 + 단순 노이즈 제거"""
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # 특수문자만 있는 줄 제거
+        if re.fullmatch(r"[-=~_*#·.•|\\/:]+", line):
+            continue
+
+        # 너무 짧은 잡음 제거
+        if len(line) <= 2:
+            continue
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
+def filter_stage2(text: str) -> str:
+    """2차 필터: 보호 규칙 적용"""
+    text = re.sub(r"\b([A-Za-z])/([A-Za-z])\b", r"\1__SLASH__\2", text)  # S/W, H/W
+    text = re.sub(r"\be-mail\b", "e__HYPHEN__mail", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=\d)\.(?=\d)", "__DOT__", text)                   # 4.5
+    text = re.sub(r"(?<=\d),(?=\d)", "__COMMA__", text)                  # 1,234
+    text = re.sub(r"\b([A-Za-z]+)-([가-힣A-Za-z0-9]+)-(\d+)\b", r"\1__HYPHEN__\2__HYPHEN__\3", text)
+
+    text = text.replace("__SLASH__", "/")
+    text = text.replace("__HYPHEN__", "-")
+    text = text.replace("__DOT__", ".")
+    text = text.replace("__COMMA__", ",")
+    text = text.replace("e__HYPHEN__mail", "e-mail")
+
+    return text
+
+def filter_stage3(text: str) -> str:
+    """3차 필터: 문서 구조 노이즈 제거"""
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # 번호만 있는 줄 제거: 1. / 1.1 / 2.3.1 / (1) / ① / i
+        if re.fullmatch(r"(\d+(\.\d+)*\.?)|(\(\d+\))|([①-⑳])|([ivxlcdmIVXLCDM]+)", line):
+            continue
+
+        # 목차성 점선 줄 제거
+        if re.search(r"\.{3,}", line):
+            continue
+
+        # 메타데이터성 줄 제거
+        if re.match(r"^(문서번호|개정번호|버전|작성일|승인일)\s*[:：]?", line):
+            continue
+
+        # 불릿만 있는 줄 제거
+        if re.fullmatch(r"[•·▪▫◦○●□■◆◇▶▷※]+", line):
+            continue
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
 
 class DocumentLoader:
     """RFP 문서(PDF/HWP) 및 메타데이터를 로드하는 클래스"""
@@ -159,6 +235,7 @@ class DocumentLoader:
             raise ValueError(f"지원하지 않는 파일 형식: {ext}")
 
         text = clean_text(raw_text)
+        text = apply_filter(text)
         filename = os.path.basename(file_path)
 
         meta = {"filename": filename, "file_path": file_path}
