@@ -157,6 +157,42 @@ def clean_text(text: str) -> str:
     text = "\n".join(lines)
     return text.strip()
 
+def apply_filter(text: str) -> str:
+    """단계별 전처리 필터 적용"""
+    text = filter_stage1(text)
+    text = filter_stage2(text)
+    text = filter_stage3(text)
+    return text
+
+def filter_stage1(text: str) -> str:
+    """1차 필터: 기본 줄 정리 + 단순 노이즈 제거"""
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # 특수문자만 있는 줄 제거
+        if re.fullmatch(r"[-=~_*#·.•|\\/:]+", line):
+            continue
+
+        # 너무 짧은 잡음 제거
+        if len(line) <= 2:
+            continue
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
+def filter_stage2(text: str) -> str:
+    return text
+
+def filter_stage3(text: str) -> str:
+    return text
+
 
 # ─────────────────────────────────────────────────────────────────
 # 메인 로더
@@ -184,6 +220,7 @@ class DocumentLoader:
             raise ValueError(f"지원하지 않는 파일 형식: {ext}")
 
         text = clean_text(raw_text)
+        text = apply_filter(text)
         filename = os.path.basename(file_path)
 
         # 메타데이터 매칭
