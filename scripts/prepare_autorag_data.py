@@ -9,7 +9,6 @@ Output format:
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from datetime import datetime, timezone
@@ -21,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.chunker import chunk_documents
 from src.document_loader import DocumentLoader
+from src.embedder import _sanitize
 from src.evaluator import EVALUATION_QUESTIONS
 
 
@@ -39,22 +39,22 @@ def _build_corpus_rows(chunks: list[dict]) -> list[dict]:
         chunk_index = int(meta.get("chunk_index", idx))
 
         doc_id = f"{filename}::chunk_{chunk_index:04d}"
-        contents = str(chunk.get("text", ""))
+        contents = _sanitize(str(chunk.get("text", "")))
         metadata = {
             "last_modified_datetime": now.isoformat(),
-            "filename": filename,
-            "발주기관": str(meta.get("발주 기관", meta.get("발주기관", ""))),
-            "사업명": str(meta.get("사업명", "")),
-            "사업금액": str(meta.get("사업 금액", meta.get("사업금액", ""))),
+            "filename": _sanitize(filename),
+            "발주기관": _sanitize(str(meta.get("발주 기관", meta.get("발주기관", "")))),
+            "사업명": _sanitize(str(meta.get("사업명", ""))),
+            "사업금액": _sanitize(str(meta.get("사업 금액", meta.get("사업금액", "")))),
             "chunk_index": chunk_index,
         }
 
         rows.append(
             {
-                "doc_id": doc_id,
+                "doc_id": _sanitize(doc_id),
                 "contents": contents,
-                "metadata": json.dumps(metadata, ensure_ascii=False),
-                "path": file_path,
+                "metadata": metadata,           # AutoRAG는 dict 객체를 요구 (JSON 문자열 불가)
+                "path": _sanitize(file_path),
                 "start_end_idx": (0, len(contents)),
             }
         )
@@ -140,13 +140,27 @@ def main() -> None:
     parser.add_argument("--chunk-method", type=str, default="semantic", choices=["naive", "semantic"])
     parser.add_argument("--chunk-size", type=int, default=800)
     parser.add_argument("--chunk-overlap", type=int, default=200)
+    parser.add_argument(
+        "--csv-text-columns", type=str, default=None,
+        help="CSV 파일에서 본문으로 사용할 컬럼명 (쉼표 구분). 미지정 시 자동 감지.",
+    )
+    parser.add_argument(
+        "--csv-row-per-doc", action="store_true",
+        help="CSV 각 행을 개별 문서로 처리. 미지정 시 CSV 전체를 하나의 문서로 처리.",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    csv_text_columns = args.csv_text_columns.split(",") if args.csv_text_columns else None
     print("[1/3] Load documents...")
-    loader = DocumentLoader(documents_dir=args.documents_dir, metadata_csv=args.metadata_csv)
+    loader = DocumentLoader(
+        documents_dir=args.documents_dir,
+        metadata_csv=args.metadata_csv,
+        csv_text_columns=csv_text_columns,
+        csv_row_per_doc=args.csv_row_per_doc,
+    )
     documents = loader.load_all()
     if not documents:
         raise RuntimeError("No documents loaded. Check --documents-dir.")

@@ -42,9 +42,12 @@ def _sanitize_chunks(chunks: list[dict]) -> list[dict]:
 def step_chunk(args, config: Config) -> Path:
     """1단계: 문서 로딩 → 청킹 → JSON 저장"""
     print("\n[1/2] 문서 로딩 중...")
+    csv_text_columns = args.csv_text_columns.split(",") if getattr(args, "csv_text_columns", None) else None
     loader = DocumentLoader(
         documents_dir=config.documents_dir,
         metadata_csv=config.metadata_csv,
+        csv_text_columns=csv_text_columns,
+        csv_row_per_doc=getattr(args, "csv_row_per_doc", False),
     )
     documents = loader.load_all()
 
@@ -113,6 +116,22 @@ def main():
         "--scenario", type=str, default="B", choices=["A", "B"],
         help="A: HuggingFace 로컬, B: OpenAI API (기본값: B)",
     )
+    # Scenario A 전용: 로컬 모델 경로 선택
+    _LOCAL_EMB = {
+        "bge": "/srv/shared_data/models/embeddings/BGE-m3-ko",
+        "sroberta": "/srv/shared_data/models/embeddings/ko-sroberta-multitask",
+    }
+    parser.add_argument(
+        "--hf-embedding-model",
+        type=str,
+        default="bge",
+        choices=list(_LOCAL_EMB.keys()),
+        help=(
+            "Scenario A 임베딩 모델 선택 (기본값: bge)\n"
+            "  bge       → BGE-m3-ko (1024-dim, 한국어 특화)\n"
+            "  sroberta  → ko-sroberta-multitask (768-dim, 경량)"
+        ),
+    )
     parser.add_argument(
         "--method", type=str, default="naive", choices=["naive", "semantic"],
         help="청킹 전략 (기본값: naive)",
@@ -131,7 +150,20 @@ def main():
         "--use-batch-api", action="store_true",
         help="OpenAI Batch API 사용 (500개 이상 청크 시 비용 50%% 절감, 처리 시간 증가)",
     )
+    # CSV/TXT 전용 옵션
+    parser.add_argument(
+        "--csv-text-columns", type=str, default=None,
+        help="CSV 파일에서 본문으로 사용할 컬럼명 (쉼표 구분, 예: '제목,내용,요구사항'). 미지정 시 자동 감지.",
+    )
+    parser.add_argument(
+        "--csv-row-per-doc", action="store_true",
+        help="CSV 각 행을 개별 문서로 처리. 미지정 시 CSV 전체를 하나의 문서로 처리.",
+    )
     args = parser.parse_args()
+
+    # Scenario A 임베딩 모델 경로 및 차원 결정
+    hf_emb_path = _LOCAL_EMB.get(args.hf_embedding_model, args.hf_embedding_model)
+    hf_emb_dim = 768 if args.hf_embedding_model == "sroberta" else 1024
 
     print("=" * 60)
     print("RFP 문서 인덱싱")
@@ -140,6 +172,8 @@ def main():
     print(f"  청킹 전략 : {args.method} | 크기: {args.chunk_size} | 중첩: {args.chunk_overlap}")
     print(f"  컬렉션    : {args.collection}")
     print(f"  Batch API : {'ON' if args.use_batch_api else 'OFF'}")
+    if args.scenario == "A":
+        print(f"  임베딩 모델: {hf_emb_path} (dim={hf_emb_dim})")
     print("=" * 60)
 
     config = Config(
@@ -150,6 +184,8 @@ def main():
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         chunking_method=args.method,
+        hf_embedding_model=hf_emb_path,
+        hf_embedding_dim=hf_emb_dim,
     )
 
     chunk_file = Path(config.processed_dir) / f"{args.collection}_chunks.json"

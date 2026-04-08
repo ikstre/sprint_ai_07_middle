@@ -1,20 +1,64 @@
+# ============================================================
+# AutoRAG 0.3.22 - Scenario B (OpenAI API)
+# ============================================================
+
+vectordb:
+  - name: default
+    db_type: chroma
+    embedding_model: text-embedding-3-small
+    collection_name: autorag_openai
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 50
+
 node_lines:
   - node_line_name: retrieve_node_line
     nodes:
-      - node_type: retrieval
+      - node_type: lexical_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 64
+        modules:
+          - module_type: bm25
+            top_k: [2, 4, 8, 16, 32, 64]
+
+      - node_type: semantic_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 64
+        modules:
+          - module_type: vectordb
+            vectordb: default
+            top_k: [2, 4, 8, 16, 32, 64]
+
+      - node_type: hybrid_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 64
+        modules:
+          - module_type: hybrid_rrf
+            top_k: [2, 4, 8, 16, 32, 64]
+          - module_type: hybrid_cc
+            top_k: [2, 4, 8, 16, 32, 64]
+            normalize_method: [mm, tmm, z, dbsf]   # 정규화 방식 4종 비교
+
+  - node_line_name: post_retrieve_node_line
+    nodes:
+      # ── Reranker: rank_gpt ────────────────────────────────────────────
+      # 검색된 문서를 GPT로 재평가해 순위를 재조정 (별도 모델 불필요, 같은 OPENAI_API_KEY 사용)
+      # top_k: 최종 generator에 넘길 문서 수
+      - node_type: passage_reranker
         strategy:
           metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
           top_k: 5
         modules:
-          - module_type: bm25
-          - module_type: vectordb
-            vectordb: default
-          - module_type: hybrid_rrf
-          - module_type: hybrid_cc
-            normalize_method: [mm, tmm]
+          - module_type: pass_reranker   # reranker 없이 그대로 통과 (baseline)
+          - module_type: rank_gpt
+            llm: gpt-5-mini
+            batch: 4
+            top_k: [3, 5]               # reranking 후 상위 N개 비교
 
-  - node_line_name: post_retrieve_node_line
-    nodes:
       - node_type: prompt_maker
         strategy:
           metrics:
@@ -22,20 +66,25 @@ node_lines:
             - metric_name: rouge
             - metric_name: sem_score
           embedding_model: openai
+          generator_modules:
+            - module_type: openai_llm
+              llm: gpt-5-mini
+              max_tokens: 512
+              batch: 4
         modules:
           - module_type: fstring
             prompt:
               - |
-                Read the passages and answer the question in Korean.
-                Question: {query}
-                Passage: {retrieved_contents}
-                Answer:
+                다음 문서를 참고하여 질문에 한국어로 답변하세요.
+                질문: {query}
+                참고 문서: {retrieved_contents}
+                답변:
               - |
-                Read the passages and answer the question in Korean.
-                Be concise and cite key constraints.
-                Question: {query}
-                Passage: {retrieved_contents}
-                Answer:
+                다음 문서를 참고하여 질문에 한국어로 간결하게 답변하세요.
+                핵심 요구사항과 조건을 중심으로 작성하세요.
+                질문: {query}
+                참고 문서: {retrieved_contents}
+                답변:
 
       - node_type: generator
         strategy:
@@ -45,7 +94,15 @@ node_lines:
             - metric_name: sem_score
           embedding_model: openai
         modules:
+          # gpt-5-mini: 균형 (기본값)
           - module_type: openai_llm
             llm: gpt-5-mini
-            temperature: [0.0, 0.2]
-            batch: 16
+            max_tokens: [512, 1024, 2048]   # 생성 토큰 수 비교
+            reasoning_effort: [low, medium, high]
+            batch: 4
+          # gpt-5-nano: 속도/비용 우선
+          - module_type: openai_llm
+            llm: gpt-5-nano
+            max_tokens: [512, 1024]
+            reasoning_effort: [low, medium]
+            batch: 4

@@ -104,28 +104,35 @@ class RAGGenerator:
         return self._llm_client
 
     def _init_hf_model(self):
-        """AutoModelForCausalLM + AutoTokenizer로 Gemma-3 등 채팅 모델을 로드한다."""
-        if not self.config.hf_token:
-            raise ValueError("HF_TOKEN is not set. .env 파일에 HF_TOKEN을 추가하세요.")
+        """AutoModelForCausalLM + AutoTokenizer로 로컬 또는 Hub 채팅 모델을 로드한다.
 
+        /srv/shared_data/models/ 의 로컬 모델은 HF_TOKEN 없이 로드 가능.
+        HuggingFace Hub 비공개 모델을 사용할 경우 .env에 HF_TOKEN을 설정한다.
+        """
         import torch
-        import huggingface_hub
         from transformers import AutoTokenizer, AutoModelForCausalLM
 
-        huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
+        # 로컬 경로 모델은 HF 토큰 불필요; Hub 비공개 모델일 때만 로그인
+        if self.config.hf_token:
+            import huggingface_hub
+            huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
 
         device = self._resolve_device()
         print(f"[Scenario A] 사용 디바이스: {device}")
+        print(f"[Scenario A] 채팅 모델 로드: {self.config.hf_chat_model}")
+
+        tok_kwargs: dict = {}
+        if self.config.hf_token:
+            tok_kwargs["token"] = self.config.hf_token
 
         tokenizer = AutoTokenizer.from_pretrained(
             self.config.hf_chat_model,
-            token=self.config.hf_token,
+            **tok_kwargs,
         )
 
-        load_kwargs: dict = {
-            "token": self.config.hf_token,
-            "torch_dtype": torch.bfloat16,
-        }
+        load_kwargs: dict = {"torch_dtype": torch.bfloat16}
+        if self.config.hf_token:
+            load_kwargs["token"] = self.config.hf_token
         if device == "cpu":
             load_kwargs["device_map"] = "cpu"
         else:
