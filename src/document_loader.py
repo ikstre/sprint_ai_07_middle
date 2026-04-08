@@ -204,8 +204,35 @@ def filter_stage2(text: str) -> str:
     return text
 
 def filter_stage3(text: str) -> str:
-    return text
+    """3차 필터: 문서 구조 노이즈 제거"""
+    lines = text.split("\n")
+    cleaned_lines = []
 
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # 번호만 있는 줄 제거: 1. / 1.1 / 2.3.1 / (1) / ① / i
+        if re.fullmatch(r"(\d+(\.\d+)*\.?)|(\(\d+\))|([①-⑳])|([ivxlcdmIVXLCDM]+)", line):
+            continue
+
+        # 목차성 점선 줄 제거
+        if re.search(r"\.{3,}", line):
+            continue
+
+        # 메타데이터성 줄 제거
+        if re.match(r"^(문서번호|개정번호|버전|작성일|승인일)\s*[:：]?", line):
+            continue
+
+        # 불릿만 있는 줄 제거
+        if re.fullmatch(r"[•·▪▫◦○●□■◆◇▶▷※]+", line):
+            continue
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
 
 # ─────────────────────────────────────────────────────────────────
 # 메인 로더
