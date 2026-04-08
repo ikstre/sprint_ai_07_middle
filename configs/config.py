@@ -33,11 +33,25 @@ class Config:
     routing_complexity_threshold: int = 50         # 글자 수 기준 단순/복잡 분기점
 
     # ── 시나리오 A: HuggingFace 로컬 모델 설정 ─────────────────────
+    # HF_TOKEN은 허깅페이스 허브 비공개 모델 다운로드 시 필요.
+    # /srv/shared_data/models/ 의 로컬 모델 사용 시 토큰 없이도 동작한다.
     hf_token: str = field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
-    hf_embedding_model: str = "intfloat/multilingual-e5-large"
-    hf_chat_model: str = "google/gemma-3-4b-it"
-    hf_embedding_dim: int = 1024
-    device: str = "auto"          # "auto": cuda → mps → cpu 자동 감지
+
+    # 임베딩 모델 (로컬 경로 또는 HuggingFace Hub 모델명)
+    # 권장: BGE-m3-ko (한국어 특화, 1024-dim)
+    # 대안: ko-sroberta-multitask (768-dim, 경량)
+    hf_embedding_model: str = "/srv/shared_data/models/embeddings/BGE-m3-ko"
+
+    # 채팅 모델 (로컬 경로 또는 HuggingFace Hub 모델명)
+    # 빠른 테스트 : /srv/shared_data/models/exaone/EXAONE-4.0-1.2B  (2.4G)
+    # 균형        : /srv/shared_data/models/exaone/EXAONE-Deep-2.4B  (4.5G)
+    # 한국어 고성능: /srv/shared_data/models/exaone/EXAONE-3.5-7.8B  (30G)
+    # 다국어      : /srv/shared_data/models/gemma/Gemma3-4B           (8.1G)
+    #             : /srv/shared_data/models/gemma/Gemma4-E4B           (15G)
+    hf_chat_model: str = "/srv/shared_data/models/exaone/EXAONE-4.0-1.2B"
+
+    hf_embedding_dim: int = 1024   # BGE-m3-ko: 1024 / ko-sroberta: 768
+    device: str = "auto"           # "auto": cuda → mps → cpu 자동 감지
     hf_max_new_tokens: int = 1024  # HF 생성 최대 토큰 (OpenAI max_tokens와 분리)
     hf_load_in_4bit: bool = False  # 4-bit 양자화 (VRAM 절약, bitsandbytes 필요)
 

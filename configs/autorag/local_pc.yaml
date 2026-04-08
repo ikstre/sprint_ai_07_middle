@@ -1,0 +1,154 @@
+# ============================================================
+# AutoRAG 0.3.22 - Scenario A-PC (로컬 PC, 8GB VRAM)
+#
+# 대상 GPU:
+#   RTX 4070 (8GB, Ada Lovelace sm_89)
+#   RTX 3060Ti (8GB, Ampere sm_86)
+#
+# 모델 경로 설정:
+#   아래 모델들은 HuggingFace Hub에서 자동 다운로드됩니다.
+#   캐시 경로를 지정하려면 HF_HOME 환경변수를 설정하세요.
+#   예) export HF_HOME=/path/to/hf_cache
+#
+# 실행 명령어:
+#   python scripts/run_autorag_optimization.py \
+#     --qa-path data/autorag/qa.parquet \
+#     --corpus-path data/autorag/corpus.parquet \
+#     --config-path configs/autorag/local_pc.yaml \
+#     --project-dir evaluation/autorag_benchmark_pc
+#
+# 주의:
+#   - gpu_memory_utilization: 0.80 → 8GB GPU에서 약 6.4GB 예약
+#   - kv_cache_dtype: auto → GPU 아키텍처에 따라 자동 선택
+#     (4070 Ada sm_89: fp8 가능 / 3060Ti Ampere sm_86: fp16 fallback)
+#   - max_model_len 미지정 → 모델 config.json 자동 참조
+#   - Gemma3-4B(8.1G)는 8GB GPU에서 로드 불가 → 제외
+#   - 첫 실행 시 HuggingFace에서 모델 다운로드 필요 (수 GB)
+# ============================================================
+
+# ── 벡터DB: 로컬 임베딩 모델 2종 비교 ──────────────────────────────────────
+vectordb:
+  - name: bge_m3
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: BAAI/bge-m3
+    collection_name: autorag_pc_bge_m3
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 32
+
+  - name: ko_sroberta
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: jhgan/ko-sroberta-multitask
+    collection_name: autorag_pc_ko_sroberta
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 32
+
+node_lines:
+  - node_line_name: retrieve_node_line
+    nodes:
+      - node_type: lexical_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 5
+        modules:
+          - module_type: bm25
+            top_k: 5
+
+      - node_type: semantic_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 5
+        modules:
+          - module_type: vectordb
+            vectordb: bge_m3
+            top_k: 5
+          - module_type: vectordb
+            vectordb: ko_sroberta
+            top_k: 5
+
+      - node_type: hybrid_retrieval
+        strategy:
+          metrics: [retrieval_f1, retrieval_ndcg, retrieval_map]
+          top_k: 5
+        modules:
+          - module_type: hybrid_rrf
+            top_k: 5
+          - module_type: hybrid_cc
+            top_k: 5
+            normalize_method: [mm, tmm]
+
+  - node_line_name: post_retrieve_node_line
+    nodes:
+      - node_type: prompt_maker
+        strategy:
+          metrics:
+            - metric_name: meteor
+            - metric_name: rouge
+          generator_modules:
+            - module_type: vllm
+              llm: LGAI-EXAONE/EXAONE-4.0-1.2B
+              max_tokens: 256
+              temperature: 0.1
+              gpu_memory_utilization: 0.80
+              kv_cache_dtype: auto
+              trust_remote_code: true
+        modules:
+          - module_type: fstring
+            prompt:
+              - |
+                다음 문서를 참고하여 질문에 한국어로 답변하세요.
+                질문: {query}
+                참고 문서: {retrieved_contents}
+                답변:
+              - |
+                다음 문서를 참고하여 질문에 한국어로 간결하게 답변하세요.
+                핵심 요구사항과 조건을 중심으로 작성하세요.
+                질문: {query}
+                참고 문서: {retrieved_contents}
+                답변:
+
+      - node_type: generator
+        strategy:
+          metrics:
+            - metric_name: meteor
+            - metric_name: rouge
+        modules:
+          # ── 빠른 테스트 (2.4G) ───────────────────────────────────────
+          - module_type: vllm
+            llm: LGAI-EXAONE/EXAONE-4.0-1.2B
+            max_tokens: 512
+            temperature: 0.1
+            gpu_memory_utilization: 0.80
+            kv_cache_dtype: auto
+            trust_remote_code: true
+
+          # ── 한국어 특화 nano (4.0G) ──────────────────────────────────
+          - module_type: vllm
+            llm: kakaocorp/kanana-nano-2.1b
+            max_tokens: 512
+            temperature: 0.1
+            gpu_memory_utilization: 0.80
+            kv_cache_dtype: auto
+
+          # ── 한국어 특화 1.5 (4.4G) ───────────────────────────────────
+          - module_type: vllm
+            llm: kakaocorp/kanana-1.5-2.1b
+            max_tokens: 512
+            temperature: 0.1
+            gpu_memory_utilization: 0.80
+            kv_cache_dtype: auto
+
+          # ── 한국어 특화 Midm (4.4G) ──────────────────────────────────
+          - module_type: vllm
+            llm: skt/Midm-2.0-Mini-Instruct
+            max_tokens: 512
+            temperature: 0.1
+            gpu_memory_utilization: 0.80
+            kv_cache_dtype: auto

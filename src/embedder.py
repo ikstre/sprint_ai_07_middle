@@ -47,16 +47,18 @@ class EmbeddingModel:
 
             self._client = OpenAI(api_key=self.config.openai_api_key)
         else:
-            if not self.config.hf_token:
-                raise ValueError("HF_TOKEN is not set. .env 파일에 HF_TOKEN을 추가하세요.")
             from sentence_transformers import SentenceTransformer
-            import huggingface_hub
-            huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
+
+            # 로컬 경로 모델은 HF 토큰 불필요; Hub 비공개 모델일 때만 로그인
+            if self.config.hf_token:
+                import huggingface_hub
+                huggingface_hub.login(token=self.config.hf_token, add_to_git_credential=False)
 
             device = self.config.device
             if device == "auto":
                 device = _resolve_device()
 
+            print(f"[Scenario A] 임베딩 모델 로드: {self.config.hf_embedding_model} (device={device})")
             self._model = SentenceTransformer(
                 self.config.hf_embedding_model,
                 device=device,
