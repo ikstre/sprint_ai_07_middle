@@ -188,6 +188,19 @@ def filter_stage1(text: str) -> str:
     return "\n".join(cleaned_lines).strip()
 
 def filter_stage2(text: str) -> str:
+    """2차 필터: 보호 규칙 적용"""
+    text = re.sub(r"\b([A-Za-z])/([A-Za-z])\b", r"\1__SLASH__\2", text)  # S/W, H/W
+    text = re.sub(r"\be-mail\b", "e__HYPHEN__mail", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=\d)\.(?=\d)", "__DOT__", text)                   # 4.5
+    text = re.sub(r"(?<=\d),(?=\d)", "__COMMA__", text)                  # 1,234
+    text = re.sub(r"\b([A-Za-z]+)-([가-힣A-Za-z0-9]+)-(\d+)\b", r"\1__HYPHEN__\2__HYPHEN__\3", text)
+
+    text = text.replace("__SLASH__", "/")
+    text = text.replace("__HYPHEN__", "-")
+    text = text.replace("__DOT__", ".")
+    text = text.replace("__COMMA__", ",")
+    text = text.replace("e__HYPHEN__mail", "e-mail")
+
     return text
 
 def filter_stage3(text: str) -> str:
