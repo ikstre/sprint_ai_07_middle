@@ -1,16 +1,14 @@
-# 기관명 빈도수 기반 중복 제거
-# 수동 보정한 data_list_fixed.csv를 활용해
-# 원본 데이터의 중복을 제거하고
-# 최종 데이터셋(data_list_cleaned.csv)을 생성하는 핵심 도구입니다.
+# 로직의 ##순서##를 변경해 데이터셋 정제 과정에서의 누락과
+# 오류를 최소화하는 개선된 버전입니다.
 
 import os
 import hashlib
 import re
 import zlib
 import pandas as pd
+import csv
 from tqdm import tqdm
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.documents import Document
 
 try:
     import olefile
@@ -18,14 +16,33 @@ except ImportError:
     pass
 
 class SmartOriginFrequencyMatcher:
-    def __init__(self, raw_data_path, csv_path):
+    def __init__(self, raw_data_path, csv_path, fixed_csv_path):
+        # 클래스 초기화 및 경로 설정
         self.raw_data_path = raw_data_path
         self.csv_path = csv_path
-        self.processed_records = {}    
-        self.log_history = []          
+        self.fixed_csv_path = fixed_csv_path
+        self.processed_records = {}
         self.discarded_files = set()
 
+    def fix_summary_excel_error(self, text):
+        # 엑셀 수식 오류 방지 처리
+        if pd.isna(text) or str(text).strip() == "": return ""
+        text = str(text).strip()
+        if text.startswith(("=", "-", "+")):
+            text = " " + text
+        return text
+
+    def clean_text_content(self, text):
+        # 출력 가독성을 위한 최종 텍스트 정제('텍스트'컬럼용)
+        if pd.isna(text) or str(text).strip() == "": return ""
+        text = str(text)
+        text = re.sub(r"[\t\r\n]+", " ", text)
+        text = re.sub(r"<[^>]*>", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
     def parse_hwp(self, file_path):
+        # HWP 파일 텍스트 추출
         try:
             if not olefile.isOleFile(file_path): return ""
             f = olefile.OleFileIO(file_path)
@@ -44,6 +61,7 @@ class SmartOriginFrequencyMatcher:
         except: return ""
 
     def clean_text(self, text):
+        # 스코어 계산용 텍스트 정제
         text = re.sub(r"<[^>]*>", " ", text)
         text = re.sub(r"[\t\r\n]+", " ", text)
         text = re.sub(r"\s+", " ", text)
