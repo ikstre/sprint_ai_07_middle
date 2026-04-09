@@ -123,35 +123,46 @@ class SmartOriginFrequencyMatcher:
         self.update_metadata_csv()
 
     def update_metadata_csv(self):
+        # 보정 데이터 통합 및 컬럼 순서 유지 저장
         if not os.path.exists(self.csv_path): return
-        df = pd.read_csv(self.csv_path)
-        col = '파일명' if '파일명' in df.columns else 'file_name'
         
-        if col in df.columns:
-            initial_count = len(df)
-            df_cleaned = df[~df[col].isin(self.discarded_files)]
-            output_file = "data_list_cleaned.csv"
-            df_cleaned.to_csv(output_file, index=False, encoding="utf-8-sig")
-            print(f"CSV 정제 완료: {initial_count}행 -> **{len(df_cleaned)}행**")
-            print(f"저장된 파일명: {output_file}")
-        else:
-            print("CSV 컬럼 확인 불가")
+        # 1. 원본 로드 및 컬럼 순서 기억
+        df = pd.read_csv(self.csv_path, dtype=str).fillna("")
+        original_cols = df.columns.tolist() # 원본 순서 저장
+        
+        # 2. 중복 제거
+        df_cleaned = df[~df['파일명'].isin(self.discarded_files)].copy()
+        
+        # 3. 보정 데이터 반영
+        if os.path.exists(self.fixed_csv_path):
+            print("** 2단계: 보정 데이터 반영 중 **")
+            df_fixed = pd.read_csv(self.fixed_csv_path, dtype=str).fillna("")
+            df_cleaned.set_index('파일명', inplace=True)
+            df_fixed.set_index('파일명', inplace=True)
+            
+            target_cols = ['공고 번호', '사업 금액', '공개 일자', '입찰 참여 시작일', '입찰 참여 마감일']
+            valid_cols = [c for c in target_cols if c in df_fixed.columns]
+            
+            df_cleaned.update(df_fixed[valid_cols])
+            df_cleaned.reset_index(inplace=True)
+            
+            # 원본 컬럼 순서로 재배치
+            df_cleaned = df_cleaned[original_cols]
+        
+        # 4. 최종 정제
+        if '사업 요약' in df_cleaned.columns:
+            df_cleaned['사업 요약'] = df_cleaned['사업 요약'].apply(self.fix_summary_excel_error)
+        if '텍스트' in df_cleaned.columns:
+            df_cleaned['텍스트'] = df_cleaned['텍스트'].apply(self.clean_text_content)
+
+        output_file = "./data/data_list_cleaned.csv"
+        df_cleaned.to_csv(output_file, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_ALL, escapechar='\\')
+        print(f"\n** 작업 완료! 최종 파일: {output_file} **")
 
 if __name__ == "__main__":
-    # 1. 원본 파일(PDF, HWP) 경로
-    SERVER_RAW = "/srv/shared_data/pdf"
-    LOCAL_RAW = "../data/files"
-    RAW_PATH = SERVER_RAW if os.path.exists(SERVER_RAW) else LOCAL_RAW
+    RAW_DIR = "./data/files"
+    ORIGIN_CSV = "./data/data_list.csv"
+    FIXED_CSV = "./data/data_list_fixed.csv"
     
-    # 2. 읽어올 파일: AB님이 수동으로 고친 'fixed' 파일
-    SERVER_CSV = "/srv/shared_data/datasets/data_list_fixed.csv"
-    LOCAL_CSV = "../data/data_list_fixed.csv"
-    CSV_PATH = SERVER_CSV if os.path.exists(SERVER_CSV) else LOCAL_CSV
-    
-    print(f"** 중복 제거 시작 **")
-    print(f"참조 경로: {RAW_PATH}")
-    
-    matcher = SmartOriginFrequencyMatcher(RAW_PATH, CSV_PATH)
+    matcher = SmartOriginFrequencyMatcher(RAW_DIR, ORIGIN_CSV, FIXED_CSV)
     matcher.run_process()
-    
-    # 참고: 결과물은 같은 폴더에 'data_list_cleaned.csv'로 저장됩니다.
