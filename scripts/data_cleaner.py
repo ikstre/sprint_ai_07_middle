@@ -160,9 +160,25 @@ class SmartOriginFrequencyMatcher:
         print(f"\n** 작업 완료! 최종 파일: {output_file} **")
 
 if __name__ == "__main__":
-    RAW_DIR = "./data/files"
-    ORIGIN_CSV = "./data/data_list.csv"
-    FIXED_CSV = "./data/data_list_fixed.csv"
+    # 1. 원본 파일(PDF, HWP) 경로 설정
+    SERVER_RAW = "/srv/shared_data/pdf"
+    LOCAL_RAW = "../data/files"
+    RAW_PATH = SERVER_RAW if os.path.exists(SERVER_RAW) else LOCAL_RAW
     
-    matcher = SmartOriginFrequencyMatcher(RAW_DIR, ORIGIN_CSV, FIXED_CSV)
+    # 2. 원본 데이터 리스트 CSV 경로 설정
+    SERVER_ORIGIN = "/srv/shared_data/datasets/data_list.csv"
+    LOCAL_ORIGIN = "../data/data_list.csv"
+    ORIGIN_PATH = SERVER_ORIGIN if os.path.exists(SERVER_ORIGIN) else LOCAL_ORIGIN
+    
+    # 3. 수동 보정본(fixed) CSV 경로 설정
+    SERVER_FIXED = "/srv/shared_data/datasets/data_list_fixed.csv"
+    LOCAL_FIXED = "../data/data_list_fixed.csv"
+    FIXED_PATH = SERVER_FIXED if os.path.exists(SERVER_FIXED) else LOCAL_FIXED
+
+    print(f"** 중복 제거 및 데이터 통합 프로세스 시작 **")
+    print(f"참조 경로: {RAW_PATH}")
+    print(f"보정 파일: {os.path.basename(FIXED_PATH)}")
+    
+    # 객체 생성 및 프로세스 실행
+    matcher = SmartOriginFrequencyMatcher(RAW_PATH, ORIGIN_PATH, FIXED_PATH)
     matcher.run_process()
