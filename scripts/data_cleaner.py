@@ -1,16 +1,14 @@
-# 기관명 빈도수 기반 중복 제거
-# 수동 보정한 data_list_fixed.csv를 활용해
-# 원본 데이터의 중복을 제거하고
-# 최종 데이터셋(data_list_cleaned.csv)을 생성하는 핵심 도구입니다.
+# 로직의 ##순서##를 변경해 데이터셋 정제 과정에서의 누락과
+# 오류를 최소화하는 개선된 버전입니다.
 
 import os
 import hashlib
 import re
 import zlib
 import pandas as pd
+import csv
 from tqdm import tqdm
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.documents import Document
 
 try:
     import olefile
@@ -18,14 +16,33 @@ except ImportError:
     pass
 
 class SmartOriginFrequencyMatcher:
-    def __init__(self, raw_data_path, csv_path):
+    def __init__(self, raw_data_path, csv_path, fixed_csv_path):
+        # 클래스 초기화 및 경로 설정
         self.raw_data_path = raw_data_path
         self.csv_path = csv_path
-        self.processed_records = {}    
-        self.log_history = []          
+        self.fixed_csv_path = fixed_csv_path
+        self.processed_records = {}
         self.discarded_files = set()
 
+    def fix_summary_excel_error(self, text):
+        # 엑셀 수식 오류 방지 처리
+        if pd.isna(text) or str(text).strip() == "": return ""
+        text = str(text).strip()
+        if text.startswith(("=", "-", "+")):
+            text = " " + text
+        return text
+
+    def clean_text_content(self, text):
+        # 출력 가독성을 위한 최종 텍스트 정제('텍스트'컬럼용)
+        if pd.isna(text) or str(text).strip() == "": return ""
+        text = str(text)
+        text = re.sub(r"[\t\r\n]+", " ", text)
+        text = re.sub(r"<[^>]*>", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
     def parse_hwp(self, file_path):
+        # HWP 파일 텍스트 추출
         try:
             if not olefile.isOleFile(file_path): return ""
             f = olefile.OleFileIO(file_path)
@@ -44,53 +61,42 @@ class SmartOriginFrequencyMatcher:
         except: return ""
 
     def clean_text(self, text):
+        # 스코어 계산용 텍스트 정제
         text = re.sub(r"<[^>]*>", " ", text)
         text = re.sub(r"[\t\r\n]+", " ", text)
         text = re.sub(r"\s+", " ", text)
         return text.strip()
 
     def get_content_hash(self, text):
+        # 내용 기반 중복 식별용 해시 생성
         pure_text = re.sub(r"\s+", "", text)
         return hashlib.md5(pure_text.encode("utf-8")).hexdigest()
 
     def calculate_match_score(self, filename, content):
-        # 1. 파일명에서 기관명 추출 (언더바 앞 단어)
+        # 기관명 빈도 기반 원본 판별 점수 계산(발주 기관은 다른데 내용이 동일한 경우를 구분하기 위함)
         org_name = filename.split('_')[0] if '_' in filename else filename[:10]
-        # 특수문자나 괄호가 포함되어 있다면 순수 텍스트만 추출
         org_name = re.sub(r'[^\w가-힣]', '', org_name)
-        
         score = 0
-        count = 0
-        first_pos = -1
-        
         if org_name:
-            # 2. 본문 전체에서의 등장 빈도수 체크 (진짜 발주처는 수십 번 언급됨)
             count = content.count(org_name)
-            score += count * 1000  # 1회 등장 시 1000점
-            
-            # 3. 최초 등장 위치 확인 (표지나 개요 등 최상단에 있을수록 높은 점수)
+            score += count * 1000
             first_pos = content.find(org_name)
-            if 0 <= first_pos < 500:
-                score += 5000  # 첫 500자 이내(표지) 등장 시 압도적 가점
-            elif 500 <= first_pos < 1500:
-                score += 2000  # 목차 수준에서 등장
-                
-        # 4. 파일 크기 보조 점수
+            if 0 <= first_pos < 500: score += 5000
+            elif 500 <= first_pos < 1500: score += 2000
         file_path = os.path.join(self.raw_data_path, filename)
         score += os.path.getsize(file_path) / 1024 / 1024
-        
-        return score, org_name, count, first_pos
+        return score
 
     def run_process(self):
+        # 파일 분석 및 중복 제거 실행
+        if not os.path.exists(self.raw_data_path): return
         file_list = [f for f in os.listdir(self.raw_data_path) 
                      if f.lower().endswith((".pdf", ".hwp"))]
         
-        print(f"** 파일 분석 및 기관명 빈도수 대조 시작 (대상: {len(file_list)}개) **")
-        
+        print("** 1단계: 중복 분석 시작 **")
         for file_name in tqdm(file_list):
             file_path = os.path.join(self.raw_data_path, file_name)
             content = ""
-            
             try:
                 if file_name.lower().endswith(".pdf"):
                     loader = PyPDFLoader(file_path)
@@ -98,121 +104,81 @@ class SmartOriginFrequencyMatcher:
                 elif file_name.lower().endswith(".hwp"):
                     content = self.parse_hwp(file_path)
                 
-                if not content or len(content.strip()) < 50:
-                    continue
-
+                if not content or len(content.strip()) < 50: continue
                 cleaned_text = self.clean_text(content)
                 content_hash = self.get_content_hash(cleaned_text)
-                
-                # 빈도수와 위치 기반 원본성 점수 계산
-                current_score, org_key, count, first_pos = self.calculate_match_score(file_name, cleaned_text)
+                current_score = self.calculate_match_score(file_name, cleaned_text)
 
                 if content_hash in self.processed_records:
                     existing = self.processed_records[content_hash]
-                    
                     if current_score > existing['score']:
-                        # 현재 파일 점수가 더 높으면 교체 (올바른 발주처 파일 찾음)
-                        self.log_history.append({
-                            "type": "SWAP",
-                            "kept": file_name,
-                            "kept_org": org_key,
-                            "kept_count": count,
-                            "kept_score": current_score,
-                            "discarded": existing['filename'],
-                            "discarded_org": existing['org_key'],
-                            "discarded_count": existing['count'],
-                            "discarded_score": existing['score']
-                        })
                         self.discarded_files.add(existing['filename'])
-                        self.processed_records[content_hash] = {
-                            'filename': file_name,
-                            'score': current_score,
-                            'org_key': org_key,
-                            'count': count,
-                            'text': cleaned_text
-                        }
+                        self.processed_records[content_hash] = {'filename': file_name, 'score': current_score}
                     else:
-                        # 기존 파일 점수가 더 높거나 같으면 현재 파일 제외
-                        self.log_history.append({
-                            "type": "DISCARD",
-                            "kept": existing['filename'],
-                            "kept_org": existing['org_key'],
-                            "kept_count": existing['count'],
-                            "kept_score": existing['score'],
-                            "discarded": file_name,
-                            "discarded_org": org_key,
-                            "discarded_count": count,
-                            "discarded_score": current_score
-                        })
                         self.discarded_files.add(file_name)
                 else:
-                    self.processed_records[content_hash] = {
-                        'filename': file_name,
-                        'score': current_score,
-                        'org_key': org_key,
-                        'count': count,
-                        'text': cleaned_text
-                    }
-                
+                    self.processed_records[content_hash] = {'filename': file_name, 'score': current_score}
             except Exception as e:
-                print(f"파일 처리 중 오류 발생 ({file_name}): {e}")
-
-        self.print_summary_log()
+                print(f"오류 ({file_name}): {e}")
         self.update_metadata_csv()
 
-    def print_summary_log(self):
-        print("\n" + "="*90)
-        print("내용 중복 및 원본 판별 상세 로그 (빈도 및 위치 기반)")
-        print("="*90)
-        
-        if not self.log_history:
-            print("중복된 문서가 발견되지 않았습니다.")
-        else:
-            for log in self.log_history:
-                if log['type'] == "SWAP":
-                    print(f"[교체] 보관: **{log['kept']}**")
-                    print(f"      ㄴ 근거: 키워드({log['kept_org']}) 본문 {log['kept_count']}회 등장 (총점 {log['kept_score']:,.1f})")
-                    print(f"      ㄴ 제외: {log['discarded']} (키워드 {log['discarded_org']} {log['discarded_count']}회 등장, 총점 {log['discarded_score']:,.1f})")
-                    print("-" * 90)
-                else:
-                    print(f"[유지] 보관: **{log['kept']}**")
-                    print(f"      ㄴ 근거: 키워드({log['kept_org']}) 본문 {log['kept_count']}회 등장 (총점 {log['kept_score']:,.1f})")
-                    print(f"      ㄴ 제외: {log['discarded']} (키워드 {log['discarded_org']} {log['discarded_count']}회 등장, 총점 {log['discarded_score']:,.1f})")
-                    print("-" * 90)
-        
-        print(f"최종 유니크 문서 확정: **{len(self.processed_records)}개**")
-        print("="*90)
-
     def update_metadata_csv(self):
+        # 보정 데이터 통합 및 컬럼 순서 유지 저장
         if not os.path.exists(self.csv_path): return
-        df = pd.read_csv(self.csv_path)
-        col = '파일명' if '파일명' in df.columns else 'file_name'
         
-        if col in df.columns:
-            initial_count = len(df)
-            df_cleaned = df[~df[col].isin(self.discarded_files)]
-            output_file = "data_list_cleaned.csv"
-            df_cleaned.to_csv(output_file, index=False, encoding="utf-8-sig")
-            print(f"CSV 정제 완료: {initial_count}행 -> **{len(df_cleaned)}행**")
-            print(f"저장된 파일명: {output_file}")
-        else:
-            print("CSV 컬럼 확인 불가")
+        # 1. 원본 로드 및 컬럼 순서 기억
+        df = pd.read_csv(self.csv_path, dtype=str).fillna("")
+        original_cols = df.columns.tolist() # 원본 순서 저장
+        
+        # 2. 중복 제거
+        df_cleaned = df[~df['파일명'].isin(self.discarded_files)].copy()
+        
+        # 3. 보정 데이터 반영
+        if os.path.exists(self.fixed_csv_path):
+            print("** 2단계: 보정 데이터 반영 중 **")
+            df_fixed = pd.read_csv(self.fixed_csv_path, dtype=str).fillna("")
+            df_cleaned.set_index('파일명', inplace=True)
+            df_fixed.set_index('파일명', inplace=True)
+            
+            target_cols = ['공고 번호', '사업 금액', '공개 일자', '입찰 참여 시작일', '입찰 참여 마감일']
+            valid_cols = [c for c in target_cols if c in df_fixed.columns]
+            
+            df_cleaned.update(df_fixed[valid_cols])
+            df_cleaned.reset_index(inplace=True)
+            
+            # 원본 컬럼 순서로 재배치
+            df_cleaned = df_cleaned[original_cols]
+        
+        # 4. 최종 정제
+        if '사업 요약' in df_cleaned.columns:
+            df_cleaned['사업 요약'] = df_cleaned['사업 요약'].apply(self.fix_summary_excel_error)
+        if '텍스트' in df_cleaned.columns:
+            df_cleaned['텍스트'] = df_cleaned['텍스트'].apply(self.clean_text_content)
+
+        output_file = "./data/data_list_cleaned.csv"
+        df_cleaned.to_csv(output_file, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_ALL, escapechar='\\')
+        print(f"\n** 작업 완료! 최종 파일: {output_file} **")
 
 if __name__ == "__main__":
-    # 1. 원본 파일(PDF, HWP) 경로
+    # 1. 원본 파일(PDF, HWP) 경로 설정
     SERVER_RAW = "/srv/shared_data/pdf"
     LOCAL_RAW = "../data/files"
     RAW_PATH = SERVER_RAW if os.path.exists(SERVER_RAW) else LOCAL_RAW
     
-    # 2. 읽어올 파일: AB님이 수동으로 고친 'fixed' 파일
-    SERVER_CSV = "/srv/shared_data/datasets/data_list_fixed.csv"
-    LOCAL_CSV = "../data/data_list_fixed.csv"
-    CSV_PATH = SERVER_CSV if os.path.exists(SERVER_CSV) else LOCAL_CSV
+    # 2. 원본 데이터 리스트 CSV 경로 설정
+    SERVER_ORIGIN = "/srv/shared_data/datasets/data_list.csv"
+    LOCAL_ORIGIN = "../data/data_list.csv"
+    ORIGIN_PATH = SERVER_ORIGIN if os.path.exists(SERVER_ORIGIN) else LOCAL_ORIGIN
     
-    print(f"** 중복 제거 시작 **")
+    # 3. 수동 보정본(fixed) CSV 경로 설정
+    SERVER_FIXED = "/srv/shared_data/datasets/data_list_fixed.csv"
+    LOCAL_FIXED = "../data/data_list_fixed.csv"
+    FIXED_PATH = SERVER_FIXED if os.path.exists(SERVER_FIXED) else LOCAL_FIXED
+
+    print(f"** 중복 제거 및 데이터 통합 프로세스 시작 **")
     print(f"참조 경로: {RAW_PATH}")
+    print(f"보정 파일: {os.path.basename(FIXED_PATH)}")
     
-    matcher = SmartOriginFrequencyMatcher(RAW_PATH, CSV_PATH)
+    # 객체 생성 및 프로세스 실행
+    matcher = SmartOriginFrequencyMatcher(RAW_PATH, ORIGIN_PATH, FIXED_PATH)
     matcher.run_process()
-    
-    # 참고: 결과물은 같은 폴더에 'data_list_cleaned.csv'로 저장됩니다.
