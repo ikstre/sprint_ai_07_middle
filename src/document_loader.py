@@ -216,8 +216,16 @@ def filter_stage3(text: str) -> str:
 class DocumentLoader:
     """RFP 문서(PDF/HWP) 및 메타데이터를 로드하는 클래스"""
 
-    def __init__(self, documents_dir: str, metadata_csv: Optional[str] = None):
+    def __init__(
+        self,
+        documents_dir: str,
+        metadata_csv: Optional[str] = None,
+        csv_text_columns: Optional[list[str]] = None,
+        csv_row_per_doc: bool = False,
+    ):
         self.documents_dir = Path(documents_dir)
+        self.csv_text_columns = csv_text_columns
+        self.csv_row_per_doc = csv_row_per_doc
         self.metadata: Optional[pd.DataFrame] = None
         if metadata_csv and os.path.exists(metadata_csv):
             self.metadata = pd.read_csv(metadata_csv)
@@ -265,8 +273,68 @@ class DocumentLoader:
 
         return {"text": text, "metadata": meta}
 
+    def load_from_csv(self) -> list[dict]:
+        """CSV의 각 행을 개별 문서로 로드한다 (csv_row_per_doc=True 전용)."""
+        if self.metadata is None:
+            raise ValueError("csv_row_per_doc 사용 시 --metadata-csv 경로가 필요합니다.")
+
+        text_cols = self.csv_text_columns or self._detect_text_columns()
+        if not text_cols:
+            raise ValueError(
+                "CSV에서 텍스트 컬럼을 감지하지 못했습니다. "
+                "--csv-text-columns 옵션으로 컬럼명을 지정하세요."
+            )
+
+        meta_cols = [c for c in self.metadata.columns if c not in text_cols]
+        documents = []
+        for idx, row in self.metadata.iterrows():
+            text_parts = []
+            for col in text_cols:
+                val = row.get(col, "")
+                if pd.notna(val) and str(val).strip():
+                    text_parts.append(str(val).strip())
+
+            text = "\n\n".join(text_parts)
+            if not text.strip():
+                print(f"  ⚠ 행 {idx}: 텍스트 없음 (건너뜀)")
+                continue
+
+            text = clean_text(text)
+            text = apply_filter(text)
+
+            meta = {c: row.get(c, "") for c in meta_cols}
+            filename_hint = str(row.get("파일명", row.get("사업명", f"row_{idx}")))
+            meta["filename"] = filename_hint
+            meta["file_path"] = filename_hint
+            meta["발주 기관"] = meta.get("발주 기관", meta.get("발주기관", ""))
+
+            documents.append({"text": text, "metadata": meta})
+            print(f"  ✓ 로드 완료: {filename_hint[:60]} ({len(text)} chars)")
+
+        print(f"\n총 {len(documents)}개 문서 로드 완료 (CSV 행)")
+        return documents
+
+    def _detect_text_columns(self) -> list[str]:
+        """텍스트 컬럼을 휴리스틱으로 감지한다."""
+        if self.metadata is None:
+            return []
+        candidates = ["텍스트", "text", "content", "본문", "내용"]
+        found = [c for c in candidates if c in self.metadata.columns]
+        if found:
+            return found
+        # 문자열 컬럼 중 평균 길이가 가장 긴 컬럼
+        str_cols = self.metadata.select_dtypes(include="object").columns
+        if len(str_cols) == 0:
+            return []
+        avg_lens = {c: self.metadata[c].dropna().astype(str).str.len().mean() for c in str_cols}
+        best = max(avg_lens, key=avg_lens.get)
+        return [best]
+
     def load_all(self) -> list[dict]:
-        """문서 디렉토리의 모든 PDF/HWP 파일을 로드한다."""
+        """문서를 로드한다. csv_row_per_doc=True면 CSV 행 기반, 아니면 파일 기반."""
+        if self.csv_row_per_doc:
+            return self.load_from_csv()
+
         documents = []
         supported_exts = {".pdf", ".hwp"}
 

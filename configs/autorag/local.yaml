@@ -7,7 +7,14 @@
 #   /srv/shared_data/models/kanana/kanana-1.5-2.1b    (4.4G, 한국어 특화)
 #   /srv/shared_data/models/midm/Midm-2.0-Mini        (4.4G, 한국어 특화)
 #   /srv/shared_data/models/gemma/Gemma3-4B           (8.1G, 순차 로드)
-#   /srv/shared_data/models/gemma/Gemma4-26B-A4B      (49G→4bit≈16G, bitsandbytes)
+#   /srv/shared_data/models/gemma/Gemma4-E4B           (15G, 별도 실행)
+#
+# 임베딩 모델 5종 비교:
+#   BGE-m3-ko               (2.2G, 다국어 BGE, 한국어 특화)
+#   ko-sroberta-multitask   (0.8G, 한국어 sRoBERTa)
+#   multilingual-e5-large   (2.2G, 다국어 E5-large, retrieval 강함)
+#   KoSimCSE-roberta-multitask (0.5G, 한국어 SimCSE, 의미 유사도 특화)
+#   kf-deberta-multitask    (0.9G, 한국어 DeBERTa, 문맥 이해 우수)
 #
 # 모델별 공식 권장 샘플링 파라미터 (generation_config.json 기준):
 #   EXAONE-4.0-1.2B : temperature=0.1 (한국어 1.2B code switching 방지, LG AI 공식)
@@ -15,10 +22,10 @@
 #   kanana          : greedy 권장 (do_sample=False, Kakao 공식), temperature=0.1
 #   Midm-2.0-Mini   : temperature=0.8, top_k=20, top_p=0.75 (KT K-intelligence 공식)
 #   Gemma3-4B       : temperature=1.0, top_k=64, top_p=0.95  ← Google 권장
-#   Gemma4-26B-A4B  : temperature=1.0, top_k=64, top_p=0.95  ← Google 권장
+#   Gemma4-E4B      : temperature=1.0, top_k=64, top_p=0.95  ← Google 권장
 #
 # 실행 명령어:
-#   python scripts/run_autorag_optimization.py \
+#   PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
 #     --qa-path data/autorag/qa.parquet \
 #     --corpus-path data/autorag/corpus.parquet \
 #     --config-path configs/autorag/local.yaml \
@@ -28,15 +35,17 @@
 #   - 실행 전 nvidia-smi로 GPU 점유 확인 권장
 #   - gpu_memory_utilization: 0.70 → 15.4GB 예약 (22GB GPU 기준)
 #   - max_model_len 미지정 → 각 모델의 max_position_embeddings 자동 사용
-#   - kv_cache_dtype: auto → 모델 dtype(bfloat16) 자동 사용 (fp8 재활성화: CUDA_HOME 설정 후 fp8로 변경)
-#   - Gemma4-26B-A4B: quantization/load_format: bitsandbytes → 4-bit 즉시 적재 (~16GB)
+#   - kv_cache_dtype: auto → 모델 dtype(bfloat16) 자동 사용
+#   - Gemma4-E4B: 15GB BF16, user-local transformers 5.x + vLLM 필요 (별도 실행)
 #   - 각 모델 평가 후 VRAM 자동 해제 (run_autorag_optimization.py 패치)
 #   - kanana/midm (llama 계열): trust_remote_code 불필요
 #   - EXAONE: trust_remote_code: true 필요
+#   - 임베딩 모델 사전 다운로드: python scripts/download_embedding_models.py
 # ============================================================
 
-# ── 벡터DB: 로컬 임베딩 모델 2종 비교 ──────────────────────────────────────
+# ── 벡터DB: 로컬 임베딩 모델 5종 비교 ──────────────────────────────────────
 vectordb:
+  # BGE-M3-ko: 한국어 특화 BGE, 다국어 지원, 한국어 도메인 성능 우수
   - name: local_bge
     db_type: chroma
     embedding_model:
@@ -48,12 +57,49 @@ vectordb:
     similarity_metric: cosine
     embedding_batch: 50
 
+  # ko-sroberta-multitask: 한국어 sRoBERTa, STS/NLI 멀티태스크 학습
   - name: local_sroberta
     db_type: chroma
     embedding_model:
       type: huggingface
       model_name: /srv/shared_data/models/embeddings/ko-sroberta-multitask
     collection_name: autorag_local_sroberta
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 50
+
+  # multilingual-e5-large: intfloat E5 대형 모델, 다국어 retrieval 최강
+  - name: local_e5_large
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: /srv/shared_data/models/embeddings/multilingual-e5-large
+    collection_name: autorag_local_e5_large
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 32
+
+  # KoSimCSE-roberta-multitask: 한국어 SimCSE, 의미 유사도 특화
+  - name: local_kosimcse
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: /srv/shared_data/models/embeddings/KoSimCSE-roberta-multitask
+    collection_name: autorag_local_kosimcse
+    client_type: persistent
+    path: ${PROJECT_DIR}/resources/chroma
+    similarity_metric: cosine
+    embedding_batch: 50
+
+  # kf-deberta-multitask: 한국어 DeBERTa, 문맥 이해 우수
+  - name: local_kf_deberta
+    db_type: chroma
+    embedding_model:
+      type: huggingface
+      model_name: /srv/shared_data/models/embeddings/kf-deberta-multitask
+    collection_name: autorag_local_kf_deberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
     similarity_metric: cosine
@@ -80,6 +126,15 @@ node_lines:
             top_k: [2, 4, 8, 16, 32, 64]
           - module_type: vectordb
             vectordb: local_sroberta
+            top_k: [2, 4, 8, 16, 32, 64]
+          - module_type: vectordb
+            vectordb: local_e5_large
+            top_k: [2, 4, 8, 16, 32, 64]
+          - module_type: vectordb
+            vectordb: local_kosimcse
+            top_k: [2, 4, 8, 16, 32, 64]
+          - module_type: vectordb
+            vectordb: local_kf_deberta
             top_k: [2, 4, 8, 16, 32, 64]
 
       - node_type: hybrid_retrieval
@@ -189,26 +244,13 @@ node_lines:
             top_k: 64
             top_p: [0.90, 0.95]
             gpu_memory_utilization: 0.70
+            max_model_len: 16384
             kv_cache_dtype: auto
 
-          # ── Gemma4-26B-A4B (49G→bitsandbytes 4bit≈16G) ──────────────
-          # temperature: 0.9~1.0 (Google 공식 1.0 중심)
-          # top_k: 64 (Google 공식 고정)
-          # top_p: 0.90~0.95 (Google 공식 0.95 중심)
-          # [공유 GPU 대비]
-          #   4-bit 가중치 ~16GB → GPU 단독 점유 시에만 안전
-          #   gpu_memory_utilization: 0.80 → 22GB × 0.80 ≈ 17.6GB (가중치 16G + KV ~1.6G)
-          #   0.70 이하 불가: 22GB × 0.70 = 15.4GB < 모델 가중치 16GB
-          #   enforce_eager + max_model_len: 4096 → KV 캐시 최소화
-          #   팀원 GPU 사용 중이면 이 모델은 OOM 가능 → nvidia-smi 확인 후 실행 권장
-          - module_type: vllm
-            llm: /srv/shared_data/models/gemma/Gemma4-26B-A4B
-            max_tokens: 2048
-            temperature: [0.9, 1.0]
-            top_k: 64
-            top_p: [0.90, 0.95]
-            gpu_memory_utilization: 0.80
-            enforce_eager: true
-            max_model_len: 4096
-            quantization: bitsandbytes
-            load_format: bitsandbytes
+          # ── Gemma4-E4B: 별도 실행 후 merge ──────────────────────────
+          # transformers 5.x + user-local vLLM 필요 (Gemma4 아키텍처 등록됨)
+          # BF16 ~15GB, dense 모델 (MoE 없음)
+          # 실행: bash scripts/run_gemma4_optimization.sh
+          # 합치기: python scripts/merge_gemma4_results.py \
+          #           --main-dir evaluation/autorag_benchmark_local \
+          #           --gemma4-dir evaluation/autorag_benchmark_gemma4

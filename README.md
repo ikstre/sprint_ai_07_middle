@@ -29,7 +29,7 @@
 |------|------------------------|------------------------------|
 | 문서 로딩 | PDF / HWP / TXT / CSV | 동일 |
 | 청킹 | naive / semantic | 동일 |
-| 임베딩 | text-embedding-3-small (dim=512) | BGE-m3-ko (dim=1024) / ko-sroberta (dim=768) |
+| 임베딩 | text-embedding-3-small (dim=512) | BGE-m3-ko / ko-sroberta / E5-large / KoSimCSE / kf-DeBERTa (AutoRAG 5종 비교) |
 | 검색 | similarity / MMR / hybrid + multi-query / rerank | 동일 |
 | 생성 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE / Gemma3 / Gemma4 / kanana / Midm 등 로컬 모델 |
 | 대화 메모리 | 슬라이딩 윈도우 (최근 5턴) | 동일 |
@@ -44,12 +44,16 @@
 | config 파일 | 시나리오 | Generator | 임베딩 |
 |------------|---------|-----------|--------|
 | `configs/autorag/tutorial.yaml` | B (OpenAI) | openai_llm — gpt-5-mini | text-embedding-3-small |
-| `configs/autorag/local.yaml` | A (GPU 서버, 22GB) | vllm — 5종 모델 | BGE-m3-ko + ko-sroberta |
+| `configs/autorag/local.yaml` | A (GPU 서버, 22GB) | vllm — 5종 모델 (Gemma4 제외) | 5종 (BGE / sroberta / E5 / SimCSE / DeBERTa) |
+| `configs/autorag/local_gemma4.yaml` | A (GPU 서버, Gemma4 전용) | vllm — Gemma4-E4B | 5종 동일 |
 | `configs/autorag/local_pc.yaml` | A-PC (8GB GPU) | vllm — 4종 모델 | BAAI/bge-m3 + ko-sroberta (HF Hub) |
 
 핵심 엔트리:
 - `scripts/prepare_autorag_data.py`
 - `scripts/run_autorag_optimization.py`
+- `scripts/download_models.py` — 생성 모델(Gemma4-E4B) + 임베딩 3종 다운로드
+- `scripts/run_gemma4_optimization.sh` — Gemma4 별도 실행
+- `scripts/merge_gemma4_results.py` — Gemma4 결과 병합
 - `apps/autorag_api.py`, `apps/autorag_streamlit.py`
 
 ### C. 평가 프레임워크 (분리 설계)
@@ -201,13 +205,31 @@ python scripts/run_autorag_optimization.py \
   --project-dir evaluation/autorag_benchmark
 ```
 
-**Scenario A — GPU 서버 (22GB VRAM)** — 실행 전 `nvidia-smi`로 GPU 점유 확인 권장
+**Scenario A — GPU 서버 (22GB VRAM, NVIDIA L4)** — 실행 전 `nvidia-smi`로 GPU 점유 확인 권장
+
+> **주의**: kanana/midm 모델이 transformers 5.x strict 검증에 막히므로 `PYTHONNOUSERSITE=1` 필수.  
+> Gemma4는 user-local transformers 5.x + vLLM이 필요하여 별도 실행 후 결과를 합칩니다.
+
 ```bash
-python scripts/run_autorag_optimization.py \
+# 사전 준비 — 모델 다운로드 (최초 1회)
+python scripts/download_models.py          # 생성모델(Gemma4-E4B) + 임베딩 3종 전체
+# python scripts/download_models.py --embed-only  # 임베딩만
+# python scripts/download_models.py --gen-only    # 생성모델만
+
+# Step 1 — 메인 실행 (EXAONE / kanana / Midm / Gemma3, 임베딩 5종)
+PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
   --qa-path data/autorag/qa.parquet \
   --corpus-path data/autorag/corpus.parquet \
   --config-path configs/autorag/local.yaml \
   --project-dir evaluation/autorag_benchmark_local
+
+# Step 2 — Gemma4-E4B 별도 실행 (user-local transformers 5.x + vLLM)
+bash scripts/run_gemma4_optimization.sh
+
+# Step 3 — 결과 병합
+python scripts/merge_gemma4_results.py \
+  --main-dir evaluation/autorag_benchmark_local \
+  --gemma4-dir evaluation/autorag_benchmark_gemma4
 ```
 
 **Scenario A-PC — 로컬 PC (RTX 4070 / 3060Ti, 8GB VRAM)**
@@ -340,23 +362,41 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 
 ### 임베딩 모델
 
+#### 앱 / 인덱싱용 (`--hf-embedding-model`)
+
 | CLI 옵션 | 서버 경로 / HF Hub ID | 차원 | 특징 |
 |---------|----------------------|------|------|
 | `--hf-embedding-model bge` | `BGE-m3-ko` / `BAAI/bge-m3` | 1024 | 다국어, 고성능 |
 | `--hf-embedding-model sroberta` | `ko-sroberta-multitask` / `jhgan/ko-sroberta-multitask` | 768 | 한국어 특화, 경량 |
 
+#### AutoRAG 비교 평가용 (`local.yaml` / `local_gemma4.yaml` vectordb 5종)
+
+| 이름 | 서버 경로 | 크기 | HF Hub ID | 특징 |
+|------|---------|------|-----------|------|
+| `local_bge` | `embeddings/BGE-m3-ko` | 2.2G | `dragonkue/BGE-m3-ko` | 한국어 특화 BGE, 다국어 |
+| `local_sroberta` | `embeddings/ko-sroberta-multitask` | 0.8G | `jhgan/ko-sroberta-multitask` | 한국어 sRoBERTa |
+| `local_e5_large` | `embeddings/multilingual-e5-large` | 2.2G | `intfloat/multilingual-e5-large` | 다국어 E5-large, retrieval 강함 |
+| `local_kosimcse` | `embeddings/KoSimCSE-roberta-multitask` | 0.4G | `BM-K/KoSimCSE-roberta-multitask` | 한국어 SimCSE, 의미 유사도 특화 |
+| `local_kf_deberta` | `embeddings/kf-deberta-multitask` | 0.7G | `upskyy/kf-deberta-multitask` | 한국어 DeBERTa, 문맥 이해 우수 |
+
 ### AutoRAG 평가 모델 (Scenario A — 서버, `local.yaml`)
 
-| 모델명 | 크기 | 특이사항 |
-|--------|------|---------|
-| EXAONE-4.0-1.2B | 2.4G | trust_remote_code 필요 |
-| kanana-nano-2.1b | 4.0G | llama 계열, 한국어 특화 |
-| kanana-1.5-2.1b | 4.4G | llama 계열, 한국어 특화 |
-| Midm-2.0-Mini | 4.4G | llama 계열, 한국어 특화 |
-| Gemma3-4B | 8.1G | 순차 로드 (이전 모델 VRAM 해제 후) |
+| 모델명 | 크기 | gpu_memory_utilization | 특이사항 |
+|--------|------|------------------------|---------|
+| EXAONE-4.0-1.2B | 2.4G | 0.70 | trust_remote_code 필요 |
+| kanana-nano-2.1b | 4.0G | 0.70 | llama 계열, 한국어 특화 |
+| kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
+| Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
+| Gemma3-4B | 8.1G | 0.70 | max_model_len: 8192 (131072 기본값은 KV 캐시 초과) |
 
-> Gemma4-E4B(15G)는 fp8 KV 캐시 적용 시 22GB GPU에서 로드 가능 — 필요 시 `local.yaml`에 추가 가능.  
-> Gemma4-26B-A4B(49G)는 22GB VRAM 초과로 단일 GPU 로드 불가.
+### AutoRAG 평가 모델 (Scenario A — 서버, `local_gemma4.yaml` — 별도 실행)
+
+| 모델명 | 서버 경로 | 크기 | gpu_memory_utilization | 특이사항 |
+|--------|---------|------|------------------------|---------|
+| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | 0.85 | BF16, dense, max_model_len: 8192 |
+
+> **transformers 버전 충돌**: kanana/midm은 transformers 4.x 필요 (5.x strict 검증 오류), Gemma4는 5.x 필요.  
+> 이 때문에 `local.yaml`(PYTHONNOUSERSITE=1)과 `local_gemma4.yaml`(user-local 5.x + vLLM)을 분리 실행 후 merge.
 
 ### AutoRAG 평가 모델 (Scenario A-PC — 8GB GPU)
 
@@ -376,8 +416,7 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 | EXAONE-3.5-7.8B | `exaone/EXAONE-3.5-7.8B` | 30G | ✅ (22GB 서버) | 한국어 고성능 |
 | EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ | 한국어 추론 특화 |
 | Gemma3-4B | `gemma/Gemma3-4B` | 8.1G | ✅ | 다국어 |
-| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ⚠️ (fp8 필요) | 멀티모달, 다국어 |
-| Gemma4-26B-A4B | `gemma/Gemma4-26B-A4B` | 49G | ❌ (22GB 초과) | MoE 26B/4B활성 |
+| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ✅ | 멀티모달, 다국어, dense |
 | kanana-nano-2.1b | `kanana/kanana-nano-2.1b` | 4.0G | ✅ | 한국어 특화, 경량 |
 | kanana-1.5-2.1b | `kanana/kanana-1.5-2.1b` | 4.4G | ✅ | 한국어 특화, 경량 |
 | Midm-2.0-Mini | `midm/Midm-2.0-Mini` | 4.4G | ✅ | 한국어 특화, 경량 |
@@ -436,9 +475,28 @@ gpt-5 계열은 `max_tokens` 대신 `max_completion_tokens` 사용.
 ### ChromaDB is_exist SQLite 변수 초과
 `run_autorag_optimization.py` 내장 패치로 자동 처리됨 (500개 단위 배치).
 
+### vLLM GPU 메모리 부족 (Free memory < desired utilization)
+`gpu_memory_utilization` 기본값 0.9가 실제 여유 메모리를 초과할 때 발생.  
+`local.yaml`의 모든 모델에 `gpu_memory_utilization: 0.70` 명시. Gemma4-E4B는 ~15GB이므로 0.85 사용.
+
+### vLLM KV 캐시 부족 (max seq len requires N GiB but only M GiB available)
+모델의 기본 max_model_len(Gemma3-4B: 131072)에 필요한 KV 캐시가 할당 메모리를 초과할 때 발생.  
+`local.yaml`에서 Gemma3-4B, `local_gemma4.yaml`에서 Gemma4-E4B에 `max_model_len: 8192` 명시.
+
 ### vLLM max_model_len 초과
 `max_model_len` 미지정 시 각 모델의 `config.json`에서 자동 참조됨.  
-`local.yaml`, `local_pc.yaml` 모두 `max_model_len` 미지정으로 설정되어 있음.
+`local.yaml`, `local_pc.yaml` 모두 필요한 모델에만 `max_model_len` 명시.
+
+### transformers 버전 충돌 (kanana/midm hidden_size 검증 오류)
+user-local transformers 5.x의 strict 검증이 kanana/midm 모델(hidden_size=1792, num_attention_heads=24)을 거부.  
+→ 메인 실행 시 `PYTHONNOUSERSITE=1` 사용 (sprint_env의 transformers 4.57.6 적용).  
+→ Gemma4는 transformers 5.x 필요이므로 `bash scripts/run_gemma4_optimization.sh` 별도 실행.
+
+### Gemma4 `model type gemma4 not recognized`
+transformers 4.x는 gemma4 아키텍처를 지원하지 않음.  
+→ `bash scripts/run_gemma4_optimization.sh` 사용 (user-local transformers 5.x + vLLM 자동 적용).  
+→ user-local vLLM 0.19.0에 `Gemma4ForConditionalGeneration`이 등록되어 있어 로드 가능.
+
 
 ### 환경 진단
 

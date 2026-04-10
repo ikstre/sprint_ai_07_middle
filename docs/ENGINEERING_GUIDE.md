@@ -50,12 +50,12 @@ This project provides:
 
 | 항목 | Scenario B (OpenAI API) | Scenario A — 서버 | Scenario A-PC — 로컬 PC |
 |------|------------------------|--------------------|------------------------|
-| 실행 환경 | 로컬/GCP 모두 가능 | GCP GPU 서버 (22GB) | RTX 4070 / 3060Ti (8GB) |
-| 채팅 모델 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE, Gemma3, kanana, Midm | 동일 (HF Hub 다운로드) |
-| 임베딩 모델 | text-embedding-3-small (dim=512) | BGE-m3-ko / ko-sroberta | BAAI/bge-m3 / ko-sroberta (HF Hub) |
+| 실행 환경 | 로컬/GCP 모두 가능 | GCP GPU 서버 L4 (22GB) | RTX 4070 / 3060Ti (8GB) |
+| 채팅 모델 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE, Gemma3, Gemma4-E4B, kanana, Midm | 동일 (HF Hub 다운로드) |
+| 임베딩 모델 | text-embedding-3-small (dim=512) | BGE-m3-ko / ko-sroberta / E5-large / KoSimCSE / kf-DeBERTa | BAAI/bge-m3 / ko-sroberta (HF Hub) |
 | 파인튜닝 | OpenAI Fine-tuning API | LoRA / QLoRA | QLoRA (4-bit, 8GB 대응) |
 | 필수 환경변수 | `OPENAI_API_KEY` | 없음 | 없음 (HF 모델 자동 다운로드) |
-| AutoRAG config | `tutorial.yaml` | `local.yaml` | `local_pc.yaml` |
+| AutoRAG config | `tutorial.yaml` | `local.yaml` + `local_gemma4.yaml` | `local_pc.yaml` |
 
 > **전환 방법**: 앱 실행 시 사이드바 **실행 모드** 라디오 버튼으로 A ↔ B 실시간 전환 가능.
 > 단, A안과 B안은 **임베딩 차원이 달라** 컬렉션을 별도로 인덱싱해야 합니다.
@@ -199,7 +199,8 @@ AutoRAG config 파일은 시나리오별로 분리되어 있습니다.
 | 파일 | 시나리오 | Generator | 임베딩 비교 |
 |------|---------|-----------|-----------|
 | `configs/autorag/tutorial.yaml` | B (OpenAI) | `openai_llm` — gpt-5-mini | text-embedding-3-small |
-| `configs/autorag/local.yaml` | A (서버, 22GB) | `vllm` — 5종 모델 | BGE-m3-ko vs ko-sroberta |
+| `configs/autorag/local.yaml` | A (서버, 22GB) | `vllm` — 5종 모델 | 5종 (BGE / sroberta / E5 / SimCSE / DeBERTa) |
+| `configs/autorag/local_gemma4.yaml` | A (서버, Gemma4 전용) | `vllm` — Gemma4-E4B | 5종 동일 |
 | `configs/autorag/local_pc.yaml` | A (PC, 8GB) | `vllm` — 4종 모델 | BAAI/bge-m3 vs ko-sroberta (HF Hub) |
 
 **Scenario B (OpenAI)**
@@ -211,14 +212,26 @@ python scripts/run_autorag_optimization.py \
   --project-dir evaluation/autorag_benchmark
 ```
 
-**Scenario A — GPU 서버**
+**Scenario A — GPU 서버 (3단계 실행)**
 ```bash
-nvidia-smi  # 실행 전 GPU 점유 확인
-python scripts/run_autorag_optimization.py \
+# 사전 준비 — 최초 1회
+python scripts/download_models.py   # Gemma4-E4B + 임베딩 3종
+
+# Step 1 — 메인 (EXAONE / kanana / Midm / Gemma3, 임베딩 5종)
+nvidia-smi  # GPU 점유 확인
+PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
   --qa-path data/autorag/qa.parquet \
   --corpus-path data/autorag/corpus.parquet \
   --config-path configs/autorag/local.yaml \
   --project-dir evaluation/autorag_benchmark_local
+
+# Step 2 — Gemma4-E4B 별도 실행
+bash scripts/run_gemma4_optimization.sh
+
+# Step 3 — 결과 병합
+python scripts/merge_gemma4_results.py \
+  --main-dir evaluation/autorag_benchmark_local \
+  --gemma4-dir evaluation/autorag_benchmark_gemma4
 ```
 
 **Scenario A-PC — 로컬 PC (8GB GPU)**
@@ -318,10 +331,22 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 
 ### 임베딩 모델
 
-| 옵션 (`--hf-embedding-model`) | 경로 | 크기 | 차원 | 특징 |
-|-------------------------------|------|------|------|------|
+#### 앱 / 인덱싱용 (`--hf-embedding-model`)
+
+| 옵션 | 경로 | 크기 | 차원 | 특징 |
+|------|------|------|------|------|
 | `bge` (기본값) | `.../embeddings/BGE-m3-ko` | 2.2G | 1024 | 다국어, 고성능 |
 | `sroberta` | `.../embeddings/ko-sroberta-multitask` | 846M | 768 | 한국어 특화, 경량 |
+
+#### AutoRAG 비교 평가용 (vectordb 5종)
+
+| 이름 | 경로 | 크기 | HF Hub ID | 특징 |
+|------|------|------|-----------|------|
+| `local_bge` | `.../embeddings/BGE-m3-ko` | 2.2G | `dragonkue/BGE-m3-ko` | 한국어 특화 BGE |
+| `local_sroberta` | `.../embeddings/ko-sroberta-multitask` | 0.8G | `jhgan/ko-sroberta-multitask` | 한국어 sRoBERTa |
+| `local_e5_large` | `.../embeddings/multilingual-e5-large` | 2.2G | `intfloat/multilingual-e5-large` | 다국어 E5-large |
+| `local_kosimcse` | `.../embeddings/KoSimCSE-roberta-multitask` | 0.4G | `BM-K/KoSimCSE-roberta-multitask` | 한국어 SimCSE |
+| `local_kf_deberta` | `.../embeddings/kf-deberta-multitask` | 0.7G | `upskyy/kf-deberta-multitask` | 한국어 DeBERTa |
 
 ### 채팅 모델 전체 목록 (서버 `/srv/shared_data/models/`)
 
@@ -332,8 +357,7 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 | EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ |
 | EXAONE-3.5-7.8B | `exaone/EXAONE-3.5-7.8B` | 30G | ✅ |
 | Gemma3-4B | `gemma/Gemma3-4B` | 8.1G | ✅ |
-| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ⚠️ fp8 필요 |
-| Gemma4-26B-A4B | `gemma/Gemma4-26B-A4B` | 49G | ❌ VRAM 초과 |
+| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ✅ |
 | kanana-nano-2.1b | `kanana/kanana-nano-2.1b` | 4.0G | ✅ |
 | kanana-1.5-2.1b | `kanana/kanana-1.5-2.1b` | 4.4G | ✅ |
 | Midm-2.0-Mini | `midm/Midm-2.0-Mini` | 4.4G | ✅ |
@@ -343,14 +367,17 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 
 | 모델명 | 크기 | gpu_memory_utilization | kv_cache_dtype |
 |--------|------|----------------------|----------------|
-| EXAONE-4.0-1.2B | 2.4G | 0.70 | fp8 |
-| kanana-nano-2.1b | 4.0G | 0.70 | fp8 |
-| kanana-1.5-2.1b | 4.4G | 0.70 | fp8 |
-| Midm-2.0-Mini | 4.4G | 0.70 | fp8 |
-| Gemma3-4B | 8.1G | 0.70 | fp8 |
+| EXAONE-4.0-1.2B | 2.4G | 0.70 | auto |
+| kanana-nano-2.1b | 4.0G | 0.70 | auto |
+| kanana-1.5-2.1b | 4.4G | 0.70 | auto |
+| Midm-2.0-Mini | 4.4G | 0.70 | auto |
+| Gemma3-4B | 8.1G | 0.70 | auto (max_model_len: 8192) |
 
-> Gemma4-E4B(15G)는 fp8 KV 캐시 적용 시 추가 가능 — `local.yaml`의 generator.modules에 vllm 블록 추가.  
-> Gemma4-26B-A4B(49G)는 단일 GPU 로드 불가.
+### AutoRAG 평가 모델 (서버, `local_gemma4.yaml` 기준 — 별도 실행)
+
+| 모델명 | 크기 | gpu_memory_utilization | 특이사항 |
+|--------|------|----------------------|---------|
+| Gemma4-E4B | 15G | 0.85 | BF16, dense, max_model_len: 8192 |
 
 ### AutoRAG 평가 모델 (로컬 PC)
 

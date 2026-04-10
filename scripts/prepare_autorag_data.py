@@ -134,7 +134,8 @@ def _build_qa_rows(corpus_df: pd.DataFrame) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare qa.parquet/corpus.parquet for AutoRAG.")
-    parser.add_argument("--documents-dir", type=str, default="data")
+    parser.add_argument("--documents-dir", type=str, default=None,
+                        help="PDF/HWP 파일 디렉토리. --csv-row-per-doc 사용 시 불필요.")
     parser.add_argument("--metadata-csv", type=str, default="data/data_list.csv")
     parser.add_argument("--output-dir", type=str, default="data/autorag")
     parser.add_argument("--chunk-method", type=str, default="semantic", choices=["naive", "semantic"])
@@ -142,13 +143,19 @@ def main() -> None:
     parser.add_argument("--chunk-overlap", type=int, default=200)
     parser.add_argument(
         "--csv-text-columns", type=str, default=None,
-        help="CSV 파일에서 본문으로 사용할 컬럼명 (쉼표 구분). 미지정 시 자동 감지.",
+        help="CSV에서 본문으로 사용할 컬럼명 (쉼표 구분). 미지정 시 자동 감지.",
     )
     parser.add_argument(
         "--csv-row-per-doc", action="store_true",
-        help="CSV 각 행을 개별 문서로 처리. 미지정 시 CSV 전체를 하나의 문서로 처리.",
+        help="CSV 각 행을 개별 문서로 처리. --metadata-csv의 텍스트 컬럼을 직접 사용.",
     )
     args = parser.parse_args()
+
+    # documents-dir 기본값: csv 모드면 불필요, 파일 모드면 "data"
+    documents_dir = args.documents_dir or ("." if args.csv_row_per_doc else "data")
+
+    if not args.csv_row_per_doc and not Path(documents_dir).exists():
+        raise FileNotFoundError(f"--documents-dir 경로를 찾을 수 없습니다: {documents_dir}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -156,14 +163,18 @@ def main() -> None:
     csv_text_columns = args.csv_text_columns.split(",") if args.csv_text_columns else None
     print("[1/3] Load documents...")
     loader = DocumentLoader(
-        documents_dir=args.documents_dir,
+        documents_dir=documents_dir,
         metadata_csv=args.metadata_csv,
         csv_text_columns=csv_text_columns,
         csv_row_per_doc=args.csv_row_per_doc,
     )
     documents = loader.load_all()
     if not documents:
-        raise RuntimeError("No documents loaded. Check --documents-dir.")
+        raise RuntimeError(
+            "No documents loaded. "
+            + ("--metadata-csv의 텍스트 컬럼을 확인하세요." if args.csv_row_per_doc
+               else "--documents-dir을 확인하세요.")
+        )
 
     print("[2/3] Chunk documents...")
     chunks = chunk_documents(

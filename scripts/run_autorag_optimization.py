@@ -123,7 +123,44 @@ _patch_chroma_is_exist()
 _patch_run_evaluator()
 
 
-# Patch 4: summary.csv의 module_name을 모델 경로 basename으로 치환
+# Patch 4: VectorDB 임베딩 모델 ingestion 후 즉시 GPU 해제
+#
+# 문제: AutoRAG start_trial 시 load_all_vectordb_from_yaml로 모든 vectordb 객체를
+#       한꺼번에 생성. BaseVectorStore.__init__에서 HuggingFace 모델이 즉시 GPU에 올라감.
+#       vectordb_list가 start_trial 전체 scope에 살아있어 generator 진입 시까지
+#       VRAM 점유 유지. (5종 × 평균 1.26GB ≈ 6.3GB 상시 점유)
+#
+# 해결: vectordb_ingest_huggingface 완료 직후 embedding 모델을 None으로 해제.
+#       ingestion이 끝난 vectordb는 embedding 없이도 retrieval에서 새로 생성되므로 무해.
+def _patch_vectordb_ingest_cleanup():
+    import gc
+    import autorag.evaluator as _ev_module
+
+    _orig_ingest = _ev_module.vectordb_ingest_huggingface
+
+    def _ingest_and_cleanup(vectordb, corpus):
+        _orig_ingest(vectordb, corpus)
+        # ingestion 완료 → HuggingFace 임베딩 모델 즉시 해제
+        try:
+            vectordb.embedding = None
+        except Exception:
+            pass
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except ImportError:
+            pass
+
+    _ev_module.vectordb_ingest_huggingface = _ingest_and_cleanup
+
+
+_patch_vectordb_ingest_cleanup()
+
+
+# Patch 5: summary.csv의 module_name을 모델 경로 basename으로 치환
 # AutoRAG는 vLLM 모듈을 항상 "Vllm"으로 표기해 모델 구분이 불가능하므로
 # 평가 완료 후 module_params의 llm 경로 basename을 module_name으로 덮어씀
 def _rename_summary_module_names(trial_dir: Path) -> None:

@@ -52,39 +52,59 @@ python scripts/run_autorag_optimization.py \
   --project-dir evaluation/autorag_benchmark
 ```
 
-### Scenario A (GPU 서버, 22GB VRAM)
-```bash
-# 실행 전 GPU 점유 확인
-nvidia-smi
+### Scenario A (GPU 서버, 22GB VRAM — NVIDIA L4)
 
-python scripts/run_autorag_optimization.py \
+> **주의**: kanana/midm은 transformers 5.x strict 검증 오류 → `PYTHONNOUSERSITE=1` 필수.  
+> Gemma4는 user-local transformers 5.x + vLLM 필요 → 별도 실행 후 결과 병합.
+
+```bash
+# 사전 준비 — 모델 다운로드 (최초 1회)
+python scripts/download_models.py           # 생성모델 + 임베딩 3종
+# python scripts/download_models.py --embed-only  # 임베딩만
+# python scripts/download_models.py --gen-only    # 생성모델만
+
+# Step 1 — 메인 실행 (EXAONE / kanana / Midm / Gemma3, 임베딩 5종 비교)
+nvidia-smi  # GPU 점유 확인
+PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
   --qa-path data/autorag/qa.parquet \
   --corpus-path data/autorag/corpus.parquet \
   --config-path configs/autorag/local.yaml \
   --project-dir evaluation/autorag_benchmark_local
+
+# Step 2 — Gemma4-E4B 별도 실행 (user-local transformers 5.x + vLLM)
+bash scripts/run_gemma4_optimization.sh
+
+# Step 3 — 결과 병합
+python scripts/merge_gemma4_results.py \
+  --main-dir evaluation/autorag_benchmark_local \
+  --gemma4-dir evaluation/autorag_benchmark_gemma4
 ```
 
-Scenario A 적용 모델 (`configs/autorag/local.yaml`):
+Scenario A 생성 모델 (`configs/autorag/local.yaml` + `local_gemma4.yaml`):
 
-| 모델 | 크기 | 특이사항 |
-|------|------|---------|
-| EXAONE-4.0-1.2B | 2.4G | trust_remote_code 필요 |
-| kanana-nano-2.1b | 4.0G | llama 계열, 한국어 특화 |
-| kanana-1.5-2.1b | 4.4G | llama 계열, 한국어 특화 |
-| Midm-2.0-Mini | 4.4G | llama 계열, 한국어 특화 |
-| Gemma3-4B | 8.1G | 이전 모델 해제 후 순차 로드 |
+| 모델 | 크기 | gpu_memory_utilization | 특이사항 |
+|------|------|------------------------|---------|
+| EXAONE-4.0-1.2B | 2.4G | 0.70 | trust_remote_code 필요 |
+| kanana-nano-2.1b | 4.0G | 0.70 | llama 계열, 한국어 특화 |
+| kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
+| Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
+| Gemma3-4B | 8.1G | 0.70 | max_model_len: 8192 |
+| Gemma4-E4B | 15G | 0.85 | BF16, dense, 별도 실행 |
 
-Scenario A 적용 임베딩 (`configs/autorag/local.yaml`):
+Scenario A 임베딩 모델 5종 비교 (`local.yaml` / `local_gemma4.yaml` vectordb):
 
-| 이름 | 모델 경로 | 특이사항 |
-|------|----------|---------|
-| local_bge | BGE-m3-ko | 다국어 지원, 고성능 |
-| local_sroberta | ko-sroberta-multitask | 한국어 특화, 경량 |
+| 이름 | 모델 경로 | 크기 | 특징 |
+|------|----------|------|------|
+| local_bge | `embeddings/BGE-m3-ko` | 2.2G | 다국어 BGE, 한국어 도메인 강함 |
+| local_sroberta | `embeddings/ko-sroberta-multitask` | 0.8G | 한국어 sRoBERTa |
+| local_e5_large | `embeddings/multilingual-e5-large` | 2.2G | 다국어 E5-large, retrieval 최강 |
+| local_kosimcse | `embeddings/KoSimCSE-roberta-multitask` | 0.4G | 한국어 SimCSE, 의미 유사도 특화 |
+| local_kf_deberta | `embeddings/kf-deberta-multitask` | 0.7G | 한국어 DeBERTa, 문맥 이해 우수 |
 
 - 각 모델 평가 완료 후 VRAM 자동 해제 (`gc.collect` + `cuda.empty_cache`)
-- `gpu_memory_utilization: 0.70` (22GB GPU 기준 약 15.4GB 예약)
-- `max_model_len` 미지정 → 모델 `config.json`의 `max_position_embeddings` 자동 참조
-- `kv_cache_dtype: fp8` → KV 캐시 메모리 절반 절약
+- `gpu_memory_utilization: 0.70` (22GB × 0.70 ≈ 15.4GB), Gemma4-E4B: 0.85
+- `max_model_len: 8192` — Gemma3-4B, Gemma4-E4B에 적용 (KV 캐시 초과 방지)
+- `kv_cache_dtype: auto` → 모델 dtype(bfloat16) 자동 사용
 
 ### Scenario A-PC (로컬 PC, 8GB GPU)
 ```bash
