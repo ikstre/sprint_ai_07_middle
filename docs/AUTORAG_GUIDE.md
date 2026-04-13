@@ -16,6 +16,35 @@ pip install -r requirements.txt
 
 ## 1) 데이터 준비
 
+### 1-A) CSV 기반 (권장) — `prepare_autorag_from_csv.py`
+
+CSV 한 행이 곧 한 RFP 문서이며, `사업 요약` 컬럼을 generation_gt로 직접 사용합니다.  
+retrieval_gt는 공고번호 기반으로 자동 연결되므로 ground truth 오류가 없습니다.
+
+```bash
+python scripts/prepare_autorag_from_csv.py \
+  --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \
+  --output-dir data/autorag_csv \
+  --chunk-size 600 \
+  --chunk-overlap 100
+```
+
+- 산출물
+  - `data/autorag_csv/corpus.parquet` — 664청크 (summary 95 + detail 569)
+  - `data/autorag_csv/qa.parquet` — 285 QA쌍 (문서당 3종 질문)
+
+청크 구조:
+- `chunk_0000`: 발주기관 + 사업명 + 사업 요약 (고정, retrieval_gt가 여기를 가리킴)
+- `chunk_0001+`: 상세 텍스트를 naive_chunk로 분할
+
+Ground truth 설계:
+- `generation_gt`: 실제 사업 요약 텍스트 → METEOR/ROUGE 정상 계산 가능
+- `retrieval_gt`: 공고번호 기반 직접 매핑 → 100% 정확
+
+config: `configs/autorag/local_csv.yaml`
+
+### 1-B) PDF/HWP 파일 기반 — `prepare_autorag_data.py`
+
 ```bash
 python scripts/prepare_autorag_data.py \
   --documents-dir data \
@@ -41,6 +70,9 @@ semantic 청킹 개선 사항 (`src/chunker.py`):
 - 섹션 간 overlap 삽입으로 경계 손실 방지
 - 최소 청크 크기(80자) 미달 시 직전 청크에 자동 병합
 
+> **주의**: PDF/HWP 기반은 retrieval_gt가 토큰 매칭으로 결정되므로 정확도가 낮을 수 있습니다.  
+> 평가 신뢰도가 중요한 경우 1-A) CSV 기반을 사용하세요.
+
 ## 2) 최적화 실행
 
 ### Scenario B (OpenAI API)
@@ -63,8 +95,20 @@ python scripts/download_models.py           # 생성모델 + 임베딩 3종
 # python scripts/download_models.py --embed-only  # 임베딩만
 # python scripts/download_models.py --gen-only    # 생성모델만
 
-# Step 1 — 메인 실행 (EXAONE / kanana / Midm / Gemma3, 임베딩 5종 비교)
+# CSV 기반 데이터 준비 (권장 — 1-A 참조)
+python scripts/prepare_autorag_from_csv.py \
+  --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \
+  --output-dir data/autorag_csv
+
+# Step 1 — CSV 기반 실행 (권장)
 nvidia-smi  # GPU 점유 확인
+PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
+  --qa-path data/autorag_csv/qa.parquet \
+  --corpus-path data/autorag_csv/corpus.parquet \
+  --config-path configs/autorag/local_csv.yaml \
+  --project-dir evaluation/autorag_benchmark_csv
+
+# Step 1 — PDF/HWP 기반 실행 (대안)
 PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
   --qa-path data/autorag/qa.parquet \
   --corpus-path data/autorag/corpus.parquet \
@@ -74,11 +118,26 @@ PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
 # Step 2 — Gemma4-E4B 별도 실행 (user-local transformers 5.x + vLLM)
 bash scripts/run_gemma4_optimization.sh
 
-# Step 3 — 결과 병합
+# Step 3 — 결과 병합 (CSV 기반 경로 기준)
 python scripts/merge_gemma4_results.py \
-  --main-dir evaluation/autorag_benchmark_local \
+  --main-dir evaluation/autorag_benchmark_csv \
   --gemma4-dir evaluation/autorag_benchmark_gemma4
 ```
+
+Config 파일 목록:
+
+| config | 데이터 | 용도 |
+|--------|--------|------|
+| `local_csv.yaml` | `data/autorag_csv/` | CSV 기반, **권장** (ground truth 정확, 평가 경로: `autorag_benchmark_csv`) |
+| `local_csv_pipeline.yaml` | `data/autorag_csv/` | 통합 파이프라인용 (run_pipeline.py가 자동 생성, 파인튜닝 모델 포함) |
+| `local.yaml` | `data/autorag/` | PDF/HWP 기반 대안 (retrieval_gt 토큰 매칭, 신뢰도 낮음) |
+| `local_gemma4.yaml` | `data/autorag/` | Gemma4-E4B 전용 별도 실행 (`bash scripts/run_gemma4_optimization.sh`) |
+| `local_pc.yaml` | `data/autorag/` | 로컬 PC (8GB GPU) |
+
+`local_csv.yaml` 주요 설정:
+- `max_tokens: [256, 512, 1024]` — 출력 토큰 수 비교 (generator 노드)
+- 프롬프트 3종: baseline / RFP 구조 명시 / 간결형
+- `top_k: [1,2,4,8,16]` — corpus 664개 규모에 최적화
 
 Scenario A 생성 모델 (`configs/autorag/local.yaml` + `local_gemma4.yaml`):
 
@@ -88,7 +147,7 @@ Scenario A 생성 모델 (`configs/autorag/local.yaml` + `local_gemma4.yaml`):
 | kanana-nano-2.1b | 4.0G | 0.70 | llama 계열, 한국어 특화 |
 | kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
-| Gemma3-4B | 8.1G | 0.70 | max_model_len: 8192 |
+| Gemma3-4B | 8.1G | 0.70 | max_model_len: 16384 |
 | Gemma4-E4B | 15G | 0.85 | BF16, dense, 별도 실행 |
 
 Scenario A 임베딩 모델 5종 비교 (`local.yaml` / `local_gemma4.yaml` vectordb):
@@ -103,7 +162,7 @@ Scenario A 임베딩 모델 5종 비교 (`local.yaml` / `local_gemma4.yaml` vect
 
 - 각 모델 평가 완료 후 VRAM 자동 해제 (`gc.collect` + `cuda.empty_cache`)
 - `gpu_memory_utilization: 0.70` (22GB × 0.70 ≈ 15.4GB), Gemma4-E4B: 0.85
-- `max_model_len: 8192` — Gemma3-4B, Gemma4-E4B에 적용 (KV 캐시 초과 방지)
+- `max_model_len: 16384` — Gemma3-4B, Gemma4-E4B에 적용 (131072 기본값은 KV 캐시 초과)
 - `kv_cache_dtype: auto` → 모델 dtype(bfloat16) 자동 사용
 
 ### Scenario A-PC (로컬 PC, 8GB GPU)
@@ -123,22 +182,118 @@ python scripts/run_autorag_optimization.py \
 - Gemma3-4B 제외 (8.1G > 6.4GB 한도)
 - 임베딩: HuggingFace Hub에서 자동 다운로드 (`BAAI/bge-m3`, `jhgan/ko-sroberta-multitask`)
 
-## 3) 결과 확인
+## 3) 통합 파이프라인 (run_pipeline.py)
+
+데이터 준비 → 파인튜닝 → AutoRAG를 단일 명령으로 실행합니다.  
+파인튜닝이 완료되면 학습된 모델이 AutoRAG config(`local_csv_pipeline.yaml`)에 **자동 추가**되어  
+원본 모델과 동시에 METEOR/ROUGE 비교 평가됩니다.
+
+### 사용 예
 
 ```bash
-# 요약 (어떤 모듈이 최적인지)
-cat evaluation/autorag_benchmark_local/0/summary.csv
+# 전체: 데이터 + 파인튜닝(2종) + AutoRAG
+python scripts/run_pipeline.py --steps all \
+  --finetune-models kanana-nano,exaone
+
+# 데이터 + AutoRAG (파인튜닝 생략)
+python scripts/run_pipeline.py --steps data,autorag
+
+# 파인튜닝 + AutoRAG (데이터 이미 준비됨)
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models kanana-nano \
+  --finetune-epochs 3
+
+# AutoRAG만 재실행
+python scripts/run_pipeline.py --steps autorag
+
+# 재학습 강제 (기존 결과 덮어쓰기)
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models kanana-nano \
+  --force-finetune
+
+# 7.8B 모델 — QLoRA 필수 (22GB GPU 메모리 한도)
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models exaone-3.5-7.8b \
+  --qlora
+
+# Gemma4-26B — 학습 불가, AutoRAG 평가만 자동 처리
+python scripts/run_pipeline.py --steps autorag \
+  --finetune-models gemma4-26b
+```
+
+### 주요 옵션
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--steps` | `all` | `data`, `finetune`, `autorag` 또는 `all` |
+| `--finetune-models` | (없음) | 쉼표 구분 모델 short name (아래 표 참조) |
+| `--finetune-epochs` | `3` | LoRA 학습 에포크 수 |
+| `--finetune-lr` | `2e-4` | 학습률 |
+| `--max-seq-length` | `1024` | 최대 시퀀스 길이 |
+| `--qlora` | false | 4-bit QLoRA (7.8B 이상, 메모리 제한 환경) |
+| `--force-data` | false | corpus/qa 재생성 |
+| `--force-finetune` | false | 기존 학습 모델 무시하고 재학습 |
+| `--config-path` | `configs/autorag/local_csv.yaml` | 기본 AutoRAG config |
+| `--project-dir` | `evaluation/autorag_benchmark_csv` | AutoRAG 출력 경로 |
+
+### `--finetune-models` 지원 모델
+
+| short name | 실제 모델 | 크기 | 비고 |
+|------------|----------|------|------|
+| `kanana-nano` | kanana-nano-2.1b | 4.0G | |
+| `kanana-1.5` | kanana-1.5-2.1b | 4.4G | |
+| `exaone` | EXAONE-4.0-1.2B | 2.4G | trust_remote_code |
+| `exaone-deep-2.4b` | EXAONE-Deep-2.4B | 4.5G | trust_remote_code |
+| `exaone-3.5-7.8b` | EXAONE-3.5-7.8B | 30G | **`--qlora` 필수** |
+| `exaone-deep-7.8b` | EXAONE-Deep-7.8B | 15G | **`--qlora` 필수** |
+| `midm` | Midm-2.0-Mini | 4.4G | |
+| `gemma3` | Gemma3-4B | 8.1G | |
+| `gemma4` | Gemma4-E4B | 15G | `--qlora` 권장 |
+| `gemma4-26b` | Gemma4-26B-NVFP4 | 22GB+ | **eval-only** (학습 불가, AutoRAG config만 추가) |
+
+### 파이프라인 동작 흐름
+
+```
+data 단계
+  CSV → data/autorag_csv/corpus.parquet + qa.parquet
+
+finetune 단계 (모델별 순차 실행)
+  kanana-nano → models/finetuned/kanana-nano/final
+  exaone      → models/finetuned/exaone/final
+  gemma4-26b  → 스킵 (eval-only)
+  ...
+
+autorag 단계
+  ┌ 일반 모델 그룹 (kanana / midm / exaone / gemma3 등)
+  │   configs/autorag/local_csv_pipeline.yaml 자동 생성
+  │   (base config + 파인튜닝 모델 + eval-only 모델 generator 추가)
+  │   → evaluation/autorag_benchmark_csv/0/
+  │
+  └ Gemma4 그룹 (gemma4 / gemma4-26b — transformers 5.x 필요)
+      configs/autorag/local_csv_pipeline_gemma.yaml 자동 생성
+      → evaluation/autorag_benchmark_csv_gemma/0/
+```
+
+> **Gemma4 그룹 분리 이유**: transformers 5.x가 필요한 Gemma4 계열은 user-local 패키지를 허용해야 하므로  
+> 별도 project dir(`autorag_benchmark_csv_gemma`)에서 자동으로 분리 실행됩니다.
+
+## 4) 결과 확인
+
+```bash
+# CSV 기반 평가 결과 (권장)
+cat evaluation/autorag_benchmark_csv/0/retrieve_node_line/*/summary.csv
+cat evaluation/autorag_benchmark_csv/0/post_retrieve_node_line/*/summary.csv
 
 # 대시보드 (시각화)
-autorag dashboard --trial_dir evaluation/autorag_benchmark_local/0
+autorag dashboard --trial_dir evaluation/autorag_benchmark_csv/0
 
 # 최적 config 추출
 autorag extract_best_config \
-  --trial_path evaluation/autorag_benchmark_local/0 \
-  --output_path evaluation/autorag_benchmark_local/best_config.yaml
+  --trial_path evaluation/autorag_benchmark_csv/0 \
+  --output_path evaluation/autorag_benchmark_csv/best_config.yaml
 ```
 
-## 4) 배포
+## 5) 배포
 
 - AutoRAG API
 ```bash
@@ -156,43 +311,44 @@ python scripts/run_autorag_api.py --trial-dir evaluation/autorag_benchmark/0
 python scripts/run_autorag_web.py --trial-path evaluation/autorag_benchmark/0
 ```
 
-## 5) 앱 통합
+## 6) 앱 통합
 - FastAPI 래퍼: `apps/autorag_api.py`
 - Streamlit 래퍼: `apps/autorag_streamlit.py`
 - 공통 런타임: `src/autorag_runner.py`
 
-## 6) 파인튜닝
+## 7) 파인튜닝 (단독 실행)
 
-AutoRAG 평가 결과를 토대로 RAG에 특화된 모델을 파인튜닝할 수 있습니다.
-학습 데이터는 `qa.parquet` + `corpus.parquet`에서 자동 생성됩니다.
+통합 파이프라인(`run_pipeline.py`) 사용을 권장합니다.  
+단독 실행이 필요한 경우 아래 명령을 사용하세요.
 
-### 6-1) 로컬 LoRA/QLoRA (오픈소스 모델)
+### 7-1) 로컬 LoRA/QLoRA (오픈소스 모델)
 
 ```bash
 # 사전 설치
 pip install peft trl bitsandbytes accelerate datasets
 
-# LoRA (서버 GPU, VRAM 충분)
+# LoRA — CSV 데이터 기반 (기본값)
 python scripts/finetune_local.py \
     --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-    --output-dir models/finetuned/kanana-nano-rag \
+    --output-dir models/finetuned/kanana-nano \
     --epochs 3
 
-# QLoRA (로컬 PC, 8GB GPU)
+# QLoRA (8GB GPU)
 python scripts/finetune_local.py \
-    --model-path kakaocorp/kanana-nano-2.1b \
-    --output-dir models/finetuned/kanana-nano-rag \
-    --qlora \
-    --epochs 3
+    --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
+    --output-dir models/finetuned/kanana-nano \
+    --qlora --epochs 3
 ```
 
 주요 옵션:
 | 옵션 | 기본값 | 설명 |
 |------|-------|------|
+| `--qa-path` | `data/autorag_csv/qa.parquet` | QA 데이터 경로 |
+| `--corpus-path` | `data/autorag_csv/corpus.parquet` | Corpus 경로 |
 | `--qlora` | false | 4-bit 양자화 (8GB GPU용) |
-| `--lora-r` | 16 | LoRA rank (높을수록 파라미터↑, 성능↑) |
+| `--lora-r` | 16 | LoRA rank |
 | `--batch-size` | 2 | 배치 크기 |
-| `--grad-accum` | 8 | Gradient accumulation (실효 배치 = 2×8=16) |
+| `--grad-accum` | 8 | Gradient accumulation |
 | `--max-seq-length` | 2048 | 최대 시퀀스 길이 |
 
 학습 후 vLLM으로 서빙:
@@ -223,13 +379,16 @@ python scripts/finetune_openai.py list
   llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 ```
 
-## 7) 주요 버그 패치 (run_autorag_optimization.py 내장)
+## 8) 주요 버그 패치 (run_autorag_optimization.py 내장 — 모든 config에 자동 적용)
 
-- **ChromaDB batch 초과**: `add_embedding`을 max_batch_size(5461) 단위로 분할 처리
-- **ChromaDB is_exist SQLite 변수 초과**: `is_exist`를 500개 단위 배치로 분할 처리
-- **VRAM 순차 해제**: `BaseModule.run_evaluator` 후 `gc.collect` + `cuda.empty_cache` 강제 실행
+- **Patch 1 — ChromaDB batch 초과**: `add_embedding`을 max_batch_size(5461) 단위로 분할 처리 (11567+ corpus 대응)
+- **Patch 2 — VRAM 순차 해제**: `BaseModule.run_evaluator` 후 `gc.collect` + `cuda.empty_cache` 강제 실행
+- **Patch 3 — ChromaDB is_exist SQLite 변수 초과**: `is_exist`를 500개 단위 배치로 분할 처리
+- **Patch 4 — VectorDB ingestion 후 임베딩 GPU 해제**: ingestion 완료 직후 `vectordb.embedding = None` + `cuda.empty_cache` (임베딩 5종 × ~1.3GB 절감, generator 단계 VRAM 확보)
+- **Patch 5 — summary.csv 모델명 정규화**: `module_name`을 `Vllm` 고정값에서 모델 경로 basename으로 치환 (결과 가독성 향상)
+- **Patch 6 — HybridCC 정규화 0-division 수정**: `normalize_mm/tmm/z/dbsf` 함수에서 `max == min`일 때 NaN 대신 정상값 반환 (`RuntimeWarning: invalid value encountered in divide` 제거)
 
-## 8) 운영 팁
+## 9) 운영 팁
 - 첫 번째 trial(`.../0`)만 고정 사용하지 말고, 지표 기반으로 승자를 선택합니다.
 - AutoRAG 결과도 `core` 지표와 함께 재검증해 운영 회귀를 막습니다.
 - 파인튜닝 전후 AutoRAG 평가를 비교해 실질적 개선 여부를 확인합니다.

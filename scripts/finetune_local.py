@@ -35,6 +35,7 @@ import json
 import random
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -79,14 +80,17 @@ def build_dataset(
         else:
             answer = str(generation_gt)
 
-        # 참조 문서 취합 (retrieval_gt는 리스트의 리스트)
+        # 참조 문서 취합 (retrieval_gt는 리스트 또는 numpy ndarray의 중첩 구조)
         doc_ids: list[str] = []
-        if isinstance(retrieval_gt, list):
-            for group in retrieval_gt:
-                if isinstance(group, list):
+        if retrieval_gt is not None:
+            outer = retrieval_gt.tolist() if isinstance(retrieval_gt, np.ndarray) else list(retrieval_gt)
+            for group in outer:
+                if isinstance(group, np.ndarray):
+                    doc_ids.extend(group.tolist())
+                elif isinstance(group, list):
                     doc_ids.extend(group)
                 else:
-                    doc_ids.append(group)
+                    doc_ids.append(str(group))
 
         context_parts: list[str] = []
         for doc_id in doc_ids:
@@ -117,6 +121,76 @@ def build_dataset(
 # 학습
 # ─────────────────────────────────────────────────────────────────
 
+def _patch_transformers_validation() -> None:
+    """transformers 5.x + huggingface_hub strict 검증 우회.
+
+    kanana-nano 등 Llama 기반 한국어 모델은 hidden_size/num_heads 비율이
+    표준 LLaMA 규격(정수배)을 벗어나지만 실제 GQA 연산에는 문제 없음.
+    huggingface_hub @strict 데코레이터는 validate_* 메서드를
+    __class_validators__ 리스트에 함수 참조로 저장하므로,
+    메서드 교체가 아니라 리스트에서 직접 제거해야 패치가 적용됩니다.
+    """
+    try:
+        from transformers.models.llama.configuration_llama import LlamaConfig
+        if hasattr(LlamaConfig, "__class_validators__"):
+            LlamaConfig.__class_validators__ = [
+                v for v in LlamaConfig.__class_validators__
+                if getattr(v, "__name__", "") != "validate_architecture"
+            ]
+    except Exception:
+        pass
+
+
+def _fix_missing_input_embeddings(model) -> None:  # type: ignore[type-arg]
+    """get_input_embeddings가 구현되지 않은 모델 패치 (EXAONE-Deep 등).
+
+    PEFT는 tied-weight 처리를 위해 model.get_input_embeddings()를 호출하는데,
+    일부 커스텀 모델(trust_remote_code)은 이 메서드를 구현하지 않음.
+    embed_tokens / wte 레이어를 탐색해 직접 연결한다.
+    """
+    try:
+        model.get_input_embeddings()
+        return  # 정상 동작 → 스킵
+    except (NotImplementedError, AttributeError):
+        pass
+
+    emb = None
+    for name, module in model.named_modules():
+        if name.endswith(("embed_tokens", "wte")) and hasattr(module, "weight"):
+            emb = module
+            break
+
+    if emb is None:
+        return  # 임베딩 레이어 탐색 실패 → 그대로 진행
+
+    model.get_input_embeddings = lambda: emb  # type: ignore[method-assign]
+    # 내부 base model(model.model / model.transformer)도 패치
+    for attr in ("model", "transformer"):
+        sub = getattr(model, attr, None)
+        if sub is not None:
+            try:
+                sub.get_input_embeddings()
+            except (NotImplementedError, AttributeError):
+                sub.get_input_embeddings = lambda: emb  # type: ignore[method-assign]
+
+
+def _get_lora_target_modules(model) -> list[str]:  # type: ignore[type-arg]
+    """모델 아키텍처에 맞는 LoRA target_modules 반환.
+
+    Gemma4는 선형 레이어를 Gemma4ClippableLinear로 래핑하므로
+    PEFT가 지원하는 실제 Linear 레이어인 내부 .linear를 타겟해야 함.
+    다른 모델(LLaMA 계열)은 q_proj 등을 직접 타겟.
+    """
+    base = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+    for _, module in model.named_modules():
+        if type(module).__name__ == "Gemma4ClippableLinear":
+            print("  [Gemma4] LoRA target: q_proj.linear 등 내부 linear 레이어 사용")
+            return [f"{m}.linear" for m in base]
+
+    return base
+
+
 def train(args: argparse.Namespace) -> None:
     try:
         import torch
@@ -128,6 +202,9 @@ def train(args: argparse.Namespace) -> None:
         print(f"필수 패키지 미설치: {e}")
         print("pip install peft trl bitsandbytes accelerate datasets")
         raise
+
+    # kanana 등 Llama 기반 모델의 transformers 5.x strict 검증 우회
+    _patch_transformers_validation()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -162,10 +239,11 @@ def train(args: argparse.Namespace) -> None:
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.model_max_length = args.max_seq_length  # trl 1.x: max_seq_length → tokenizer에 직접 설정
 
     load_kwargs: dict = {
         "trust_remote_code": args.trust_remote_code,
-        "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+        "dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
         "device_map": "auto",
     }
 
@@ -181,6 +259,7 @@ def train(args: argparse.Namespace) -> None:
         print("  QLoRA (4-bit) 모드 활성화")
 
     model = AutoModelForCausalLM.from_pretrained(args.model_path, **load_kwargs)
+    _fix_missing_input_embeddings(model)
     model.enable_input_require_grads()
 
     # ── LoRA 설정 ─────────────────────────────────────────────────
@@ -190,7 +269,7 @@ def train(args: argparse.Namespace) -> None:
         lora_dropout=0.05,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=_get_lora_target_modules(model),
     )
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
@@ -211,7 +290,6 @@ def train(args: argparse.Namespace) -> None:
         eval_strategy="epoch" if val_dataset else "no",
         save_strategy="epoch",
         load_best_model_at_end=val_dataset is not None,
-        max_seq_length=args.max_seq_length,
         report_to="none",
     )
 
@@ -223,11 +301,30 @@ def train(args: argparse.Namespace) -> None:
         processing_class=tokenizer,
     )
 
+    # Gemma3/4: transformers 5.x에서 학습 시 token_type_ids 필수
+    # SFTTrainer가 생성하지 않으므로 collator를 래핑해 all-zero로 주입
+    model_type = getattr(getattr(model, "config", None), "model_type", "")
+    if "gemma" in model_type.lower():
+        _orig_collator = trainer.data_collator
+
+        def _gemma_collator(features):
+            batch = _orig_collator(features)
+            if "token_type_ids" not in batch:
+                batch["token_type_ids"] = torch.zeros_like(batch["input_ids"])
+            return batch
+
+        trainer.data_collator = _gemma_collator
+        print(f"  [{model_type}] token_type_ids collator 패치 적용")
+
     print("\n학습 시작...")
     trainer.train()
 
-    # ── 저장 ─────────────────────────────────────────────────────
-    trainer.save_model(str(output_dir / "final"))
+    # ── 저장 (LoRA 병합 → vLLM 로드 가능한 전체 가중치) ──────────────
+    # trainer.save_model()은 LoRA 어댑터만 저장(config.json 없음) →
+    # vLLM이 로드 불가. merge_and_unload()로 기반 모델에 병합 후 저장.
+    print("\nLoRA 어댑터 병합 중 (기반 모델 + LoRA → BF16/FP16)...")
+    merged = trainer.model.merge_and_unload()
+    merged.save_pretrained(str(output_dir / "final"))
     tokenizer.save_pretrained(str(output_dir / "final"))
     print(f"\n학습 완료. 저장 경로: {output_dir / 'final'}")
     print("\nvLLM 서빙 방법:")
@@ -242,8 +339,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="로컬 모델 LoRA/QLoRA 파인튜닝")
     parser.add_argument("--model-path", required=True, help="모델 경로 또는 HuggingFace 모델 ID")
     parser.add_argument("--output-dir", required=True, help="학습 결과 저장 디렉토리")
-    parser.add_argument("--qa-path", default="data/autorag/qa.parquet")
-    parser.add_argument("--corpus-path", default="data/autorag/corpus.parquet")
+    parser.add_argument("--qa-path", default="data/autorag_csv/qa.parquet",
+                        help="QA parquet 경로 (기본: data/autorag_csv/qa.parquet)")
+    parser.add_argument("--corpus-path", default="data/autorag_csv/corpus.parquet",
+                        help="Corpus parquet 경로 (기본: data/autorag_csv/corpus.parquet)")
     parser.add_argument("--qlora", action="store_true", help="4-bit QLoRA 사용 (VRAM 절약)")
     parser.add_argument("--trust-remote-code", action="store_true", help="EXAONE 등 커스텀 코드 모델")
     parser.add_argument("--epochs", type=int, default=3)

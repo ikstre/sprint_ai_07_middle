@@ -69,10 +69,19 @@ def _pick_retrieval_gt(question: str, corpus_df: pd.DataFrame, top_k: int = 3) -
 
     scored: list[tuple[int, str]] = []
     for _, row in corpus_df.iterrows():
-        title_hint = f"{row.get('path', '')} {row.get('metadata', '')}"
-        doc_tokens = _tokenize(title_hint)
+        # metadata는 dict이므로 실제 값들을 추출해서 토큰화
+        meta = row.get("metadata", {})
+        if isinstance(meta, dict):
+            meta_text = " ".join(str(v) for v in meta.values())
+        else:
+            meta_text = str(meta)
 
+        # doc_id와 metadata 값 기반 1차 매칭
+        title_hint = f"{row.get('doc_id', '')} {meta_text}"
+        doc_tokens = _tokenize(title_hint)
         overlap = len(q_tokens.intersection(doc_tokens))
+
+        # 1차 매칭 실패 시 contents 기반 2차 매칭
         if overlap == 0:
             preview = str(row.get("contents", ""))[:1200]
             overlap = len(q_tokens.intersection(_tokenize(preview)))
@@ -94,13 +103,16 @@ def _build_qa_rows(corpus_df: pd.DataFrame) -> list[dict]:
         query = str(item["question"])
         retrieval_gt = [_pick_retrieval_gt(query, corpus_df)]
 
-        expected_keywords = item.get("expected_keywords", [])
-        if expected_keywords:
-            gt_text = f"핵심 키워드: {', '.join(expected_keywords)}"
-        elif item.get("expected_behavior") == "should_decline":
-            gt_text = "문서 근거가 없으면 모른다고 답변"
-        else:
-            gt_text = "문서 근거 기반 요약 답변"
+        # generation_gt: reference_answer 우선 사용 (키워드 목록 대신 실제 답변 텍스트)
+        gt_text = item.get("reference_answer", "")
+        if not gt_text:
+            expected_keywords = item.get("expected_keywords", [])
+            if expected_keywords:
+                gt_text = f"핵심 키워드: {', '.join(expected_keywords)}"
+            elif item.get("expected_behavior") == "should_decline":
+                gt_text = "문서 근거가 없으면 모른다고 답변"
+            else:
+                gt_text = "문서 근거 기반 요약 답변"
 
         rows.append(
             {

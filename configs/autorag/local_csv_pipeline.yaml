@@ -1,0 +1,284 @@
+vectordb:
+- name: local_bge
+  db_type: chroma
+  embedding_model:
+    type: huggingface
+    model_name: /srv/shared_data/models/embeddings/BGE-m3-ko
+  collection_name: autorag_csv_bge
+  client_type: persistent
+  path: ${PROJECT_DIR}/resources/chroma
+  similarity_metric: cosine
+  embedding_batch: 50
+- name: local_sroberta
+  db_type: chroma
+  embedding_model:
+    type: huggingface
+    model_name: /srv/shared_data/models/embeddings/ko-sroberta-multitask
+  collection_name: autorag_csv_sroberta
+  client_type: persistent
+  path: ${PROJECT_DIR}/resources/chroma
+  similarity_metric: cosine
+  embedding_batch: 50
+- name: local_e5_large
+  db_type: chroma
+  embedding_model:
+    type: huggingface
+    model_name: /srv/shared_data/models/embeddings/multilingual-e5-large
+  collection_name: autorag_csv_e5_large
+  client_type: persistent
+  path: ${PROJECT_DIR}/resources/chroma
+  similarity_metric: cosine
+  embedding_batch: 32
+- name: local_kosimcse
+  db_type: chroma
+  embedding_model:
+    type: huggingface
+    model_name: /srv/shared_data/models/embeddings/KoSimCSE-roberta-multitask
+  collection_name: autorag_csv_kosimcse
+  client_type: persistent
+  path: ${PROJECT_DIR}/resources/chroma
+  similarity_metric: cosine
+  embedding_batch: 50
+- name: local_kf_deberta
+  db_type: chroma
+  embedding_model:
+    type: huggingface
+    model_name: /srv/shared_data/models/embeddings/kf-deberta-multitask
+  collection_name: autorag_csv_kf_deberta
+  client_type: persistent
+  path: ${PROJECT_DIR}/resources/chroma
+  similarity_metric: cosine
+  embedding_batch: 50
+node_lines:
+- node_line_name: retrieve_node_line
+  nodes:
+  - node_type: lexical_retrieval
+    strategy:
+      metrics:
+      - retrieval_f1
+      - retrieval_ndcg
+      - retrieval_map
+      top_k: 16
+    modules:
+    - module_type: bm25
+      top_k:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+  - node_type: semantic_retrieval
+    strategy:
+      metrics:
+      - retrieval_f1
+      - retrieval_ndcg
+      - retrieval_map
+      top_k: 16
+    modules:
+    - module_type: vectordb
+      vectordb: local_bge
+      top_k:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+    - module_type: vectordb
+      vectordb: local_sroberta
+      top_k:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+    - module_type: vectordb
+      vectordb: local_e5_large
+      top_k:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+    - module_type: vectordb
+      vectordb: local_kosimcse
+      top_k:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+    - module_type: vectordb
+      vectordb: local_kf_deberta
+      top_k:
+      - 1
+      - 2
+      - 4
+      - 8
+      - 16
+  - node_type: hybrid_retrieval
+    strategy:
+      metrics:
+      - retrieval_f1
+      - retrieval_ndcg
+      - retrieval_map
+      top_k: 16
+    modules:
+    - module_type: hybrid_rrf
+      top_k:
+      - 2
+      - 4
+      - 8
+      - 16
+    - module_type: hybrid_cc
+      top_k:
+      - 2
+      - 4
+      - 8
+      - 16
+      normalize_method:
+      - mm
+      - tmm
+- node_line_name: post_retrieve_node_line
+  nodes:
+  - node_type: prompt_maker
+    strategy:
+      metrics:
+      - metric_name: meteor
+      - metric_name: rouge
+      generator_modules:
+      - module_type: vllm
+        llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+        max_tokens: 512
+        temperature: 0.1
+        gpu_memory_utilization: 0.7
+        kv_cache_dtype: auto
+        trust_remote_code: true
+    modules:
+    - module_type: fstring
+      prompt:
+      - '다음 문서를 참고하여 질문에 한국어로 답변하세요.
+
+        질문: {query}
+
+        참고 문서: {retrieved_contents}
+
+        답변:
+
+        '
+      - '아래는 공공/기업 입찰 제안요청서(RFP) 문서입니다.
+
+        문서 내용을 바탕으로 사업 목적, 범위, 기대효과를 중심으로 질문에 한국어로 답변하세요.
+
+        질문: {query}
+
+        참고 문서: {retrieved_contents}
+
+        답변:
+
+        '
+      - '다음 RFP 문서를 참고하여 질문에 간결하고 정확하게 한국어로 답변하세요.
+
+        불필요한 내용 없이 핵심 사항만 요약하세요.
+
+        질문: {query}
+
+        참고 문서: {retrieved_contents}
+
+        답변:
+
+        '
+  - node_type: generator
+    strategy:
+      metrics:
+      - metric_name: meteor
+      - metric_name: rouge
+    modules:
+    - module_type: vllm
+      llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+      max_tokens:
+      - 256
+      - 512
+      - 1024
+      temperature:
+      - 0.1
+      - 0.2
+      top_p:
+      - 0.85
+      - 0.95
+      gpu_memory_utilization: 0.7
+      kv_cache_dtype: auto
+      trust_remote_code: true
+    - module_type: vllm
+      llm: /srv/shared_data/models/kanana/kanana-nano-2.1b
+      max_tokens:
+      - 256
+      - 512
+      - 1024
+      temperature:
+      - 0.1
+      - 0.2
+      top_p:
+      - 0.85
+      - 0.95
+      gpu_memory_utilization: 0.7
+      kv_cache_dtype: auto
+    - module_type: vllm
+      llm: /srv/shared_data/models/kanana/kanana-1.5-2.1b
+      max_tokens:
+      - 256
+      - 512
+      - 1024
+      temperature:
+      - 0.1
+      - 0.2
+      top_p:
+      - 0.85
+      - 0.95
+      gpu_memory_utilization: 0.7
+      kv_cache_dtype: auto
+    - module_type: vllm
+      llm: /srv/shared_data/models/midm/Midm-2.0-Mini
+      max_tokens:
+      - 256
+      - 512
+      - 1024
+      temperature:
+      - 0.7
+      - 0.8
+      top_k: 20
+      top_p:
+      - 0.8
+      - 0.9
+      gpu_memory_utilization: 0.7
+      kv_cache_dtype: auto
+    - module_type: vllm
+      llm: /srv/shared_data/models/gemma/Gemma3-4B
+      max_tokens:
+      - 256
+      - 512
+      - 1024
+      temperature:
+      - 0.9
+      - 1.0
+      top_k: 64
+      top_p:
+      - 0.9
+      - 0.95
+      gpu_memory_utilization: 0.7
+      max_model_len: 16384
+      kv_cache_dtype: auto
+    - module_type: vllm
+      llm: /home/leetaeho/sprint_ai_07_middle/models/finetuned/kanana-nano/final
+      max_tokens:
+      - 256
+      - 512
+      - 1024
+      gpu_memory_utilization: 0.7
+      kv_cache_dtype: auto
+      temperature:
+      - 0.1
+      - 0.2
+      top_p:
+      - 0.85
+      - 0.95
+      max_model_len: 8192

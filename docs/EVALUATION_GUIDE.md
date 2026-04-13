@@ -51,6 +51,20 @@ python scripts/run_evaluation.py \
 - `--no-run`: 기존 `gate_report_core.json`만 판정.
 - `--allow-fail`: 로컬 진단용(실패여도 종료코드 0).
 
+## AutoRAG 평가 데이터 품질 주의사항
+
+AutoRAG는 `qa.parquet`의 `retrieval_gt` / `generation_gt`를 ground truth로 사용합니다.
+
+| 항목 | 구 방식 (`data/autorag/`) | 현행 방식 (`data/autorag_csv/`) |
+|------|--------------------------|--------------------------------|
+| `retrieval_gt` | 토큰 매칭 (부정확, 오매핑 다수) | 공고번호 직접 연결 (100% 정확) |
+| `generation_gt` | 키워드 목록 문자열 | 실제 사업 요약 텍스트 |
+| QA 수 | 9개 | 285개 (문서당 3종) |
+| METEOR/ROUGE 신뢰도 | 낮음 (gt가 키워드라서) | 정상 |
+
+AutoRAG 평가 시 반드시 `data/autorag_csv/` + `configs/autorag/local_csv.yaml` 조합을 사용하세요.  
+결과 경로: `evaluation/autorag_benchmark_csv/0/`
+
 ## 지표 해석 요약
 - Retrieval
   - `hit_at_5`: 정답 관련 문서가 상위 5개에 있는 비율.
