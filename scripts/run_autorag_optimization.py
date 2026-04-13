@@ -34,6 +34,26 @@ warnings.filterwarnings(
 
 load_dotenv()
 
+
+def _patch_transformers_validation() -> None:
+    """vLLM config 로드 시 transformers 5.x strict 검증 우회 (kanana 등).
+
+    finetune_local.py와 동일한 패치. vLLM이 내부적으로
+    AutoConfig.from_pretrained()를 호출할 경우 대비.
+    """
+    try:
+        from transformers.models.llama.configuration_llama import LlamaConfig
+        if hasattr(LlamaConfig, "__class_validators__"):
+            LlamaConfig.__class_validators__ = [
+                v for v in LlamaConfig.__class_validators__
+                if getattr(v, "__name__", "") != "validate_architecture"
+            ]
+    except Exception:
+        pass
+
+
+_patch_transformers_validation()
+
 _AUTORAG_PYTHON = os.getenv("AUTORAG_PYTHON", "")
 if _AUTORAG_PYTHON and Path(_AUTORAG_PYTHON).exists() and \
         sys.executable != str(Path(_AUTORAG_PYTHON).resolve()):
@@ -123,7 +143,99 @@ _patch_chroma_is_exist()
 _patch_run_evaluator()
 
 
-# Patch 4: summary.csv의 module_name을 모델 경로 basename으로 치환
+# Patch 4: VectorDB 임베딩 모델 ingestion 후 즉시 GPU 해제
+#
+# 문제: AutoRAG start_trial 시 load_all_vectordb_from_yaml로 모든 vectordb 객체를
+#       한꺼번에 생성. BaseVectorStore.__init__에서 HuggingFace 모델이 즉시 GPU에 올라감.
+#       vectordb_list가 start_trial 전체 scope에 살아있어 generator 진입 시까지
+#       VRAM 점유 유지. (5종 × 평균 1.26GB ≈ 6.3GB 상시 점유)
+#
+# 해결: vectordb_ingest_huggingface 완료 직후 embedding 모델을 None으로 해제.
+#       ingestion이 끝난 vectordb는 embedding 없이도 retrieval에서 새로 생성되므로 무해.
+def _patch_vectordb_ingest_cleanup():
+    import gc
+    import autorag.evaluator as _ev_module
+
+    _orig_ingest = _ev_module.vectordb_ingest_huggingface
+
+    def _ingest_and_cleanup(vectordb, corpus):
+        _orig_ingest(vectordb, corpus)
+        # ingestion 완료 → HuggingFace 임베딩 모델 즉시 해제
+        try:
+            vectordb.embedding = None
+        except Exception:
+            pass
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except ImportError:
+            pass
+
+    _ev_module.vectordb_ingest_huggingface = _ingest_and_cleanup
+
+
+_patch_vectordb_ingest_cleanup()
+
+
+# Patch 6: hybrid_cc 정규화 함수의 0-division RuntimeWarning 수정
+#
+# 문제: normalize_mm/normalize_tmm/normalize_z/normalize_dbsf 모두
+#       max == min(점수가 전부 동일)이면 분모가 0이 되어 NaN 반환.
+#       top_k=1이거나 BM25가 동일 점수를 반환할 때 쿼리 단위로 반복 발생.
+#       NaN 점수는 fuse_per_query의 weighted_sum → 정렬 순서 불일치.
+#
+# 해결: 각 정규화 함수에서 분모 == 0 이면 의미 있는 상수를 반환:
+#       - mm/tmm: 1.0 (모두 동일 → 동등 최고 점수)
+#       - z:      0.0 (표준 편차 0 → z-score 0)
+#       - dbsf:   0.5 (3-sigma 범위 중앙)
+def _patch_hybrid_cc_normalize():
+    import numpy as np
+    import autorag.nodes.hybridretrieval.hybrid_cc as _cc
+
+    def _normalize_mm(scores, fixed_min_value=0):
+        arr = np.array(scores, dtype=float)
+        max_v, min_v = np.max(arr), np.min(arr)
+        denom = max_v - min_v
+        return np.ones_like(arr) if denom == 0 else (arr - min_v) / denom
+
+    def _normalize_tmm(scores, fixed_min_value):
+        arr = np.array(scores, dtype=float)
+        max_v = np.max(arr)
+        denom = max_v - fixed_min_value
+        return np.zeros_like(arr) if denom == 0 else (arr - fixed_min_value) / denom
+
+    def _normalize_z(scores, fixed_min_value=0):
+        arr = np.array(scores, dtype=float)
+        std_v = np.std(arr)
+        return np.zeros_like(arr) if std_v == 0 else (arr - np.mean(arr)) / std_v
+
+    def _normalize_dbsf(scores, fixed_min_value=0):
+        arr = np.array(scores, dtype=float)
+        mean_v = np.mean(arr)
+        std_v = np.std(arr)
+        if std_v == 0:
+            return np.full_like(arr, 0.5)
+        min_v = mean_v - 3 * std_v
+        max_v = mean_v + 3 * std_v
+        return (arr - min_v) / (max_v - min_v)
+
+    _cc.normalize_mm = _normalize_mm
+    _cc.normalize_tmm = _normalize_tmm
+    _cc.normalize_z = _normalize_z
+    _cc.normalize_dbsf = _normalize_dbsf
+    _cc.normalize_method_dict["mm"] = _normalize_mm
+    _cc.normalize_method_dict["tmm"] = _normalize_tmm
+    _cc.normalize_method_dict["z"] = _normalize_z
+    _cc.normalize_method_dict["dbsf"] = _normalize_dbsf
+
+
+_patch_hybrid_cc_normalize()
+
+
+# Patch 5: summary.csv의 module_name을 모델 경로 basename으로 치환
 # AutoRAG는 vLLM 모듈을 항상 "Vllm"으로 표기해 모델 구분이 불가능하므로
 # 평가 완료 후 module_params의 llm 경로 basename을 module_name으로 덮어씀
 def _rename_summary_module_names(trial_dir: Path) -> None:

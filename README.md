@@ -29,7 +29,7 @@
 |------|------------------------|------------------------------|
 | 문서 로딩 | PDF / HWP / TXT / CSV | 동일 |
 | 청킹 | naive / semantic | 동일 |
-| 임베딩 | text-embedding-3-small (dim=512) | BGE-m3-ko (dim=1024) / ko-sroberta (dim=768) |
+| 임베딩 | text-embedding-3-small (dim=512) | BGE-m3-ko / ko-sroberta / E5-large / KoSimCSE / kf-DeBERTa (AutoRAG 5종 비교) |
 | 검색 | similarity / MMR / hybrid + multi-query / rerank | 동일 |
 | 생성 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE / Gemma3 / Gemma4 / kanana / Midm 등 로컬 모델 |
 | 대화 메모리 | 슬라이딩 윈도우 (최근 5턴) | 동일 |
@@ -41,15 +41,24 @@
 
 ### B. AutoRAG 실험/배포
 
-| config 파일 | 시나리오 | Generator | 임베딩 |
-|------------|---------|-----------|--------|
-| `configs/autorag/tutorial.yaml` | B (OpenAI) | openai_llm — gpt-5-mini | text-embedding-3-small |
-| `configs/autorag/local.yaml` | A (GPU 서버, 22GB) | vllm — 5종 모델 | BGE-m3-ko + ko-sroberta |
-| `configs/autorag/local_pc.yaml` | A-PC (8GB GPU) | vllm — 4종 모델 | BAAI/bge-m3 + ko-sroberta (HF Hub) |
+| config 파일 | 데이터 | 시나리오 | Generator | 임베딩 |
+|------------|--------|---------|-----------|--------|
+| `configs/autorag/local_csv.yaml` | `data/autorag_csv/` | A (GPU 서버, **권장**) | vllm — 5종 모델 | 5종 동일 |
+| `configs/autorag/local_csv_pipeline.yaml` | `data/autorag_csv/` | A (GPU 서버, 파이프라인) | vllm — 원본+파인튜닝 모델 | 5종 동일 |
+| `configs/autorag/tutorial.yaml` | `data/autorag/` | B (OpenAI) | openai_llm — gpt-5-mini | text-embedding-3-small |
+| `configs/autorag/local.yaml` | `data/autorag/` | A (GPU 서버, PDF/HWP) | vllm — 5종 모델 (Gemma4 제외) | 5종 (BGE / sroberta / E5 / SimCSE / DeBERTa) |
+| `configs/autorag/local_gemma4.yaml` | `data/autorag/` | A (GPU 서버, Gemma4 전용) | vllm — Gemma4-E4B | 5종 동일 |
+| `configs/autorag/local_pc.yaml` | `data/autorag/` | A-PC (8GB GPU) | vllm — 4종 모델 | BAAI/bge-m3 + ko-sroberta (HF Hub) |
+
+`local_csv.yaml` 특징: CSV 기반 ground truth (retrieval_gt 100% 정확, generation_gt 실제 텍스트), `max_tokens: [256, 512, 1024]` 비교, 프롬프트 3종.
 
 핵심 엔트리:
-- `scripts/prepare_autorag_data.py`
+- `scripts/prepare_autorag_from_csv.py` — CSV 기반 corpus/qa 생성 (권장)
+- `scripts/prepare_autorag_data.py` — PDF/HWP 기반 corpus/qa 생성
 - `scripts/run_autorag_optimization.py`
+- `scripts/download_models.py` — 생성 모델(Gemma4-E4B) + 임베딩 3종 다운로드
+- `scripts/run_gemma4_optimization.sh` — Gemma4 별도 실행
+- `scripts/merge_gemma4_results.py` — Gemma4 결과 병합
 - `apps/autorag_api.py`, `apps/autorag_streamlit.py`
 
 ### C. 평가 프레임워크 (분리 설계)
@@ -201,9 +210,46 @@ python scripts/run_autorag_optimization.py \
   --project-dir evaluation/autorag_benchmark
 ```
 
-**Scenario A — GPU 서버 (22GB VRAM)** — 실행 전 `nvidia-smi`로 GPU 점유 확인 권장
+**Scenario A — GPU 서버 (22GB VRAM, NVIDIA L4)** — 실행 전 `nvidia-smi`로 GPU 점유 확인 권장
+
+> **주의**: kanana/midm 모델이 transformers 5.x strict 검증에 막히므로 `PYTHONNOUSERSITE=1` 필수.  
+> Gemma4는 user-local transformers 5.x + vLLM이 필요하여 별도 실행 후 결과를 합칩니다.
+
 ```bash
-python scripts/run_autorag_optimization.py \
+# 사전 준비 — 모델 다운로드 (최초 1회)
+python scripts/download_models.py          # 생성모델(Gemma4-E4B) + 임베딩 3종 전체
+# python scripts/download_models.py --embed-only  # 임베딩만
+# python scripts/download_models.py --gen-only    # 생성모델만
+
+# ── CSV 기반 실행 (권장) ─────────────────────────────────────────────────────
+# ground truth 100% 정확 · corpus 664개 최적화 · 프롬프트 3종 비교
+
+# Step 0 — CSV 기반 corpus/qa 생성
+python scripts/prepare_autorag_from_csv.py \
+  --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \
+  --output-dir data/autorag_csv
+
+# Step 1 — 메인 실행 (EXAONE / kanana / Midm / Gemma3, 임베딩 5종)
+nvidia-smi  # GPU 점유 확인
+PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
+  --qa-path data/autorag_csv/qa.parquet \
+  --corpus-path data/autorag_csv/corpus.parquet \
+  --config-path configs/autorag/local_csv.yaml \
+  --project-dir evaluation/autorag_benchmark_csv
+
+# Step 2 — Gemma4-E4B 별도 실행 (user-local transformers 5.x + vLLM)
+bash scripts/run_gemma4_optimization.sh
+
+# Step 3 — 결과 병합
+python scripts/merge_gemma4_results.py \
+  --main-dir evaluation/autorag_benchmark_csv \
+  --gemma4-dir evaluation/autorag_benchmark_gemma4
+
+# ── PDF/HWP 기반 실행 (대안) ─────────────────────────────────────────────────
+# retrieval_gt가 토큰 매칭 기반이므로 평가 신뢰도 낮음
+
+# Step 1 — 메인 실행
+PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
   --qa-path data/autorag/qa.parquet \
   --corpus-path data/autorag/corpus.parquet \
   --config-path configs/autorag/local.yaml \
@@ -223,29 +269,121 @@ python scripts/run_autorag_optimization.py \
 > **AutoRAG 0.3.22 노드명 변경**: 구버전의 `node_type: retrieval` 단일 노드는 지원 종료.  
 > `lexical_retrieval` / `semantic_retrieval` / `hybrid_retrieval` 로 분리해서 사용해야 합니다.
 >
-> **내장 패치** (`run_autorag_optimization.py`):
-> - ChromaDB `add_embedding` batch 초과 자동 분할 처리 (11567 > 5461 오류 방지)
-> - ChromaDB `is_exist` SQLite 변수 초과 자동 분할 처리 (500개 단위)
-> - 각 모델 평가 후 VRAM 자동 해제 (`gc.collect` + `cuda.empty_cache`)
-> - 위 패치는 `tutorial.yaml`, `local.yaml`, `local_pc.yaml` 모두에 자동 적용됨
+> **내장 패치** (`run_autorag_optimization.py` — 모든 config에 자동 적용됨):
+> - Patch 1: ChromaDB `add_embedding` batch 초과 자동 분할 처리 (5461개 단위, 11567 > 5461 오류 방지)
+> - Patch 2: 각 모델 평가 후 VRAM 자동 해제 (`gc.collect` + `cuda.empty_cache`)
+> - Patch 3: ChromaDB `is_exist` SQLite 변수 초과 자동 분할 처리 (500개 단위)
+> - Patch 4: VectorDB ingestion 완료 후 임베딩 모델 즉시 GPU 해제 (5종 × ~1.3GB 절감)
+> - Patch 5: `summary.csv`의 `module_name`을 모델 경로 basename으로 치환 (`Vllm` → 실제 모델명)
+> - Patch 6: `HybridCC` 정규화 함수 0-division 수정 (동일 점수 시 NaN → 정상값, RuntimeWarning 제거)
 
 ### 4-3. AutoRAG 결과 확인
 
 ```bash
-# 요약 CSV
-cat evaluation/autorag_benchmark_local/0/summary.csv
+# 요약 CSV (CSV 기반 권장 경로)
+cat evaluation/autorag_benchmark_csv/0/retrieve_node_line/*/summary.csv
+cat evaluation/autorag_benchmark_csv/0/post_retrieve_node_line/*/summary.csv
 
 # 대시보드 (시각화)
-autorag dashboard --trial_dir evaluation/autorag_benchmark_local/0
+autorag dashboard --trial_dir evaluation/autorag_benchmark_csv/0
 
 # 최적 config 추출
 autorag extract_best_config \
-  --trial_path evaluation/autorag_benchmark_local/0 \
-  --output_path evaluation/autorag_benchmark_local/best_config.yaml
+  --trial_path evaluation/autorag_benchmark_csv/0 \
+  --output_path evaluation/autorag_benchmark_csv/best_config.yaml
 
 # API 서빙
-autorag run_api --trial_dir evaluation/autorag_benchmark_local/0 --host 0.0.0.0 --port 8000
+autorag run_api --trial_dir evaluation/autorag_benchmark_csv/0 --host 0.0.0.0 --port 8000
 ```
+
+### 4-4. 통합 파이프라인 (run_pipeline.py)
+
+데이터 준비 → 파인튜닝 → AutoRAG를 단일 명령으로 실행합니다.  
+파인튜닝이 완료되면 학습된 모델이 AutoRAG config(`local_csv_pipeline.yaml`)에 **자동 추가**되어 원본 모델과 동시에 비교 평가됩니다.
+
+```bash
+# 전체: 데이터 + 파인튜닝(2종) + AutoRAG
+python scripts/run_pipeline.py --steps all \
+  --finetune-models kanana-nano,exaone
+
+# 데이터 + AutoRAG (파인튜닝 생략)
+python scripts/run_pipeline.py --steps data,autorag
+
+# 파인튜닝 + AutoRAG (데이터 이미 준비됨)
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models kanana-nano \
+  --finetune-epochs 3
+
+# AutoRAG만 재실행
+python scripts/run_pipeline.py --steps autorag
+
+# 재학습 강제 (기존 결과 덮어쓰기)
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models kanana-nano \
+  --force-finetune
+
+# 7.8B 모델 — QLoRA 필수 (22GB GPU 메모리 한도)
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models exaone-3.5-7.8b \
+  --qlora
+
+# Gemma4-26B — 학습 불가, AutoRAG 평가만 (--finetune-models에 포함 시 자동 eval-only 처리)
+python scripts/run_pipeline.py --steps autorag \
+  --finetune-models gemma4-26b
+```
+
+**주요 옵션**
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--steps` | `all` | `data`, `finetune`, `autorag` 또는 `all` |
+| `--finetune-models` | (없음) | 쉼표 구분 모델 short name (아래 표 참조) |
+| `--finetune-epochs` | `3` | LoRA 학습 에포크 수 |
+| `--finetune-lr` | `2e-4` | 학습률 |
+| `--max-seq-length` | `1024` | 최대 시퀀스 길이 |
+| `--qlora` | false | 4-bit QLoRA (7.8B 이상, 메모리 제한 환경) |
+| `--force-data` | false | corpus/qa 재생성 |
+| `--force-finetune` | false | 기존 학습 모델 무시하고 재학습 |
+| `--config-path` | `configs/autorag/local_csv.yaml` | 기본 AutoRAG config |
+| `--project-dir` | `evaluation/autorag_benchmark_csv` | AutoRAG 출력 경로 |
+
+**`--finetune-models` 지원 모델**
+
+| short name | 실제 모델 | 크기 | 비고 |
+|------------|----------|------|------|
+| `kanana-nano` | kanana-nano-2.1b | 4.0G | |
+| `kanana-1.5` | kanana-1.5-2.1b | 4.4G | |
+| `exaone` | EXAONE-4.0-1.2B | 2.4G | trust_remote_code |
+| `exaone-deep-2.4b` | EXAONE-Deep-2.4B | 4.5G | trust_remote_code |
+| `exaone-3.5-7.8b` | EXAONE-3.5-7.8B | 30G | **`--qlora` 필수** |
+| `exaone-deep-7.8b` | EXAONE-Deep-7.8B | 15G | **`--qlora` 필수** |
+| `midm` | Midm-2.0-Mini | 4.4G | |
+| `gemma3` | Gemma3-4B | 8.1G | |
+| `gemma4` | Gemma4-E4B | 15G | `--qlora` 권장 |
+| `gemma4-26b` | Gemma4-26B-NVFP4 | 22GB+ | **eval-only** (학습 불가, AutoRAG config만 추가) |
+
+**파이프라인 동작 흐름**
+
+```
+data 단계
+  CSV → data/autorag_csv/corpus.parquet + qa.parquet
+
+finetune 단계 (모델별 순차 실행)
+  kanana-nano → models/finetuned/kanana-nano/final
+  exaone      → models/finetuned/exaone/final
+  ...
+
+autorag 단계
+  ┌ 일반 모델 그룹 (kanana / midm / exaone / gemma3 등)
+  │   configs/autorag/local_csv_pipeline.yaml 자동 생성
+  │   → evaluation/autorag_benchmark_csv/0/
+  │
+  └ Gemma4 그룹 (gemma4 / gemma4-26b — transformers 5.x 필요)
+      configs/autorag/local_csv_pipeline_gemma.yaml 자동 생성
+      → evaluation/autorag_benchmark_csv_gemma/0/
+```
+
+> Gemma4 그룹은 user-local transformers 5.x가 필요하므로 별도 project dir에서 자동 실행됩니다.
 
 ---
 
@@ -340,23 +478,41 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 
 ### 임베딩 모델
 
+#### 앱 / 인덱싱용 (`--hf-embedding-model`)
+
 | CLI 옵션 | 서버 경로 / HF Hub ID | 차원 | 특징 |
 |---------|----------------------|------|------|
 | `--hf-embedding-model bge` | `BGE-m3-ko` / `BAAI/bge-m3` | 1024 | 다국어, 고성능 |
 | `--hf-embedding-model sroberta` | `ko-sroberta-multitask` / `jhgan/ko-sroberta-multitask` | 768 | 한국어 특화, 경량 |
 
+#### AutoRAG 비교 평가용 (`local.yaml` / `local_gemma4.yaml` vectordb 5종)
+
+| 이름 | 서버 경로 | 크기 | HF Hub ID | 특징 |
+|------|---------|------|-----------|------|
+| `local_bge` | `embeddings/BGE-m3-ko` | 2.2G | `dragonkue/BGE-m3-ko` | 한국어 특화 BGE, 다국어 |
+| `local_sroberta` | `embeddings/ko-sroberta-multitask` | 0.8G | `jhgan/ko-sroberta-multitask` | 한국어 sRoBERTa |
+| `local_e5_large` | `embeddings/multilingual-e5-large` | 2.2G | `intfloat/multilingual-e5-large` | 다국어 E5-large, retrieval 강함 |
+| `local_kosimcse` | `embeddings/KoSimCSE-roberta-multitask` | 0.4G | `BM-K/KoSimCSE-roberta-multitask` | 한국어 SimCSE, 의미 유사도 특화 |
+| `local_kf_deberta` | `embeddings/kf-deberta-multitask` | 0.7G | `upskyy/kf-deberta-multitask` | 한국어 DeBERTa, 문맥 이해 우수 |
+
 ### AutoRAG 평가 모델 (Scenario A — 서버, `local.yaml`)
 
-| 모델명 | 크기 | 특이사항 |
-|--------|------|---------|
-| EXAONE-4.0-1.2B | 2.4G | trust_remote_code 필요 |
-| kanana-nano-2.1b | 4.0G | llama 계열, 한국어 특화 |
-| kanana-1.5-2.1b | 4.4G | llama 계열, 한국어 특화 |
-| Midm-2.0-Mini | 4.4G | llama 계열, 한국어 특화 |
-| Gemma3-4B | 8.1G | 순차 로드 (이전 모델 VRAM 해제 후) |
+| 모델명 | 크기 | gpu_memory_utilization | 특이사항 |
+|--------|------|------------------------|---------|
+| EXAONE-4.0-1.2B | 2.4G | 0.70 | trust_remote_code 필요 |
+| kanana-nano-2.1b | 4.0G | 0.70 | llama 계열, 한국어 특화 |
+| kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
+| Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
+| Gemma3-4B | 8.1G | 0.70 | max_model_len: 16384 (131072 기본값은 KV 캐시 초과) |
 
-> Gemma4-E4B(15G)는 fp8 KV 캐시 적용 시 22GB GPU에서 로드 가능 — 필요 시 `local.yaml`에 추가 가능.  
-> Gemma4-26B-A4B(49G)는 22GB VRAM 초과로 단일 GPU 로드 불가.
+### AutoRAG 평가 모델 (Scenario A — 서버, `local_gemma4.yaml` — 별도 실행)
+
+| 모델명 | 서버 경로 | 크기 | gpu_memory_utilization | 특이사항 |
+|--------|---------|------|------------------------|---------|
+| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | 0.85 | BF16, dense, max_model_len: 16384 |
+
+> **transformers 버전 충돌**: kanana/midm은 transformers 4.x 필요 (5.x strict 검증 오류), Gemma4는 5.x 필요.  
+> 이 때문에 `local.yaml`(PYTHONNOUSERSITE=1)과 `local_gemma4.yaml`(user-local 5.x + vLLM)을 분리 실행 후 merge.
 
 ### AutoRAG 평가 모델 (Scenario A-PC — 8GB GPU)
 
@@ -376,8 +532,7 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 | EXAONE-3.5-7.8B | `exaone/EXAONE-3.5-7.8B` | 30G | ✅ (22GB 서버) | 한국어 고성능 |
 | EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ | 한국어 추론 특화 |
 | Gemma3-4B | `gemma/Gemma3-4B` | 8.1G | ✅ | 다국어 |
-| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ⚠️ (fp8 필요) | 멀티모달, 다국어 |
-| Gemma4-26B-A4B | `gemma/Gemma4-26B-A4B` | 49G | ❌ (22GB 초과) | MoE 26B/4B활성 |
+| Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ✅ | 멀티모달, 다국어, dense |
 | kanana-nano-2.1b | `kanana/kanana-nano-2.1b` | 4.0G | ✅ | 한국어 특화, 경량 |
 | kanana-1.5-2.1b | `kanana/kanana-1.5-2.1b` | 4.4G | ✅ | 한국어 특화, 경량 |
 | Midm-2.0-Mini | `midm/Midm-2.0-Mini` | 4.4G | ✅ | 한국어 특화, 경량 |
@@ -430,15 +585,39 @@ AutoRAG 0.3.22에서 `node_type: retrieval` 노드명 변경.
 gpt-5 계열은 `max_tokens` 대신 `max_completion_tokens` 사용.  
 `src/evaluation/evaluator.py`, `src/generator.py` 에서 이미 적용됨.
 
+### RuntimeWarning: invalid value encountered in divide (HybridCC)
+`hybrid_cc.py`의 정규화 함수에서 `max == min`(동일 점수)일 때 분모가 0이 되어 NaN 반환.  
+top_k=1이거나 BM25가 여러 문서에 동일 점수를 부여할 때 발생. NaN 점수로 retrieval 순위가 불정확해짐.  
+→ `run_autorag_optimization.py` Patch 6으로 자동 처리됨 (RuntimeWarning 완전 제거).
+
 ### ChromaDB batch size 초과 (11567 > 5461)
-`run_autorag_optimization.py` 내장 패치로 자동 처리됨.
+`run_autorag_optimization.py` Patch 1로 자동 처리됨.
 
 ### ChromaDB is_exist SQLite 변수 초과
-`run_autorag_optimization.py` 내장 패치로 자동 처리됨 (500개 단위 배치).
+`run_autorag_optimization.py` Patch 3으로 자동 처리됨 (500개 단위 배치).
+
+### vLLM GPU 메모리 부족 (Free memory < desired utilization)
+`gpu_memory_utilization` 기본값 0.9가 실제 여유 메모리를 초과할 때 발생.  
+`local.yaml` / `local_csv.yaml`의 모든 모델에 `gpu_memory_utilization: 0.70` 명시. Gemma4-E4B는 0.85 사용.
+
+### vLLM KV 캐시 부족 (max seq len requires N GiB but only M GiB available)
+모델의 기본 max_model_len(Gemma3-4B: 131072)에 필요한 KV 캐시가 할당 메모리를 초과할 때 발생.  
+`local.yaml` / `local_csv.yaml`에서 Gemma3-4B에 `max_model_len: 16384`, `local_gemma4.yaml`에서 Gemma4-E4B에 `max_model_len: 16384` 명시.
 
 ### vLLM max_model_len 초과
 `max_model_len` 미지정 시 각 모델의 `config.json`에서 자동 참조됨.  
-`local.yaml`, `local_pc.yaml` 모두 `max_model_len` 미지정으로 설정되어 있음.
+`local.yaml`, `local_pc.yaml` 모두 필요한 모델에만 `max_model_len` 명시.
+
+### transformers 버전 충돌 (kanana/midm hidden_size 검증 오류)
+user-local transformers 5.x의 strict 검증이 kanana/midm 모델(hidden_size=1792, num_attention_heads=24)을 거부.  
+→ 메인 실행 시 `PYTHONNOUSERSITE=1` 사용 (sprint_env의 transformers 4.57.6 적용).  
+→ Gemma4는 transformers 5.x 필요이므로 `bash scripts/run_gemma4_optimization.sh` 별도 실행.
+
+### Gemma4 `model type gemma4 not recognized`
+transformers 4.x는 gemma4 아키텍처를 지원하지 않음.  
+→ `bash scripts/run_gemma4_optimization.sh` 사용 (user-local transformers 5.x + vLLM 자동 적용).  
+→ user-local vLLM 0.19.0에 `Gemma4ForConditionalGeneration`이 등록되어 있어 로드 가능.
+
 
 ### 환경 진단
 

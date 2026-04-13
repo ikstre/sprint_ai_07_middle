@@ -69,10 +69,19 @@ def _pick_retrieval_gt(question: str, corpus_df: pd.DataFrame, top_k: int = 3) -
 
     scored: list[tuple[int, str]] = []
     for _, row in corpus_df.iterrows():
-        title_hint = f"{row.get('path', '')} {row.get('metadata', '')}"
-        doc_tokens = _tokenize(title_hint)
+        # metadata는 dict이므로 실제 값들을 추출해서 토큰화
+        meta = row.get("metadata", {})
+        if isinstance(meta, dict):
+            meta_text = " ".join(str(v) for v in meta.values())
+        else:
+            meta_text = str(meta)
 
+        # doc_id와 metadata 값 기반 1차 매칭
+        title_hint = f"{row.get('doc_id', '')} {meta_text}"
+        doc_tokens = _tokenize(title_hint)
         overlap = len(q_tokens.intersection(doc_tokens))
+
+        # 1차 매칭 실패 시 contents 기반 2차 매칭
         if overlap == 0:
             preview = str(row.get("contents", ""))[:1200]
             overlap = len(q_tokens.intersection(_tokenize(preview)))
@@ -94,13 +103,16 @@ def _build_qa_rows(corpus_df: pd.DataFrame) -> list[dict]:
         query = str(item["question"])
         retrieval_gt = [_pick_retrieval_gt(query, corpus_df)]
 
-        expected_keywords = item.get("expected_keywords", [])
-        if expected_keywords:
-            gt_text = f"핵심 키워드: {', '.join(expected_keywords)}"
-        elif item.get("expected_behavior") == "should_decline":
-            gt_text = "문서 근거가 없으면 모른다고 답변"
-        else:
-            gt_text = "문서 근거 기반 요약 답변"
+        # generation_gt: reference_answer 우선 사용 (키워드 목록 대신 실제 답변 텍스트)
+        gt_text = item.get("reference_answer", "")
+        if not gt_text:
+            expected_keywords = item.get("expected_keywords", [])
+            if expected_keywords:
+                gt_text = f"핵심 키워드: {', '.join(expected_keywords)}"
+            elif item.get("expected_behavior") == "should_decline":
+                gt_text = "문서 근거가 없으면 모른다고 답변"
+            else:
+                gt_text = "문서 근거 기반 요약 답변"
 
         rows.append(
             {
@@ -134,7 +146,8 @@ def _build_qa_rows(corpus_df: pd.DataFrame) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare qa.parquet/corpus.parquet for AutoRAG.")
-    parser.add_argument("--documents-dir", type=str, default="data")
+    parser.add_argument("--documents-dir", type=str, default=None,
+                        help="PDF/HWP 파일 디렉토리. --csv-row-per-doc 사용 시 불필요.")
     parser.add_argument("--metadata-csv", type=str, default="data/data_list.csv")
     parser.add_argument("--output-dir", type=str, default="data/autorag")
     parser.add_argument("--chunk-method", type=str, default="semantic", choices=["naive", "semantic"])
@@ -142,13 +155,19 @@ def main() -> None:
     parser.add_argument("--chunk-overlap", type=int, default=200)
     parser.add_argument(
         "--csv-text-columns", type=str, default=None,
-        help="CSV 파일에서 본문으로 사용할 컬럼명 (쉼표 구분). 미지정 시 자동 감지.",
+        help="CSV에서 본문으로 사용할 컬럼명 (쉼표 구분). 미지정 시 자동 감지.",
     )
     parser.add_argument(
         "--csv-row-per-doc", action="store_true",
-        help="CSV 각 행을 개별 문서로 처리. 미지정 시 CSV 전체를 하나의 문서로 처리.",
+        help="CSV 각 행을 개별 문서로 처리. --metadata-csv의 텍스트 컬럼을 직접 사용.",
     )
     args = parser.parse_args()
+
+    # documents-dir 기본값: csv 모드면 불필요, 파일 모드면 "data"
+    documents_dir = args.documents_dir or ("." if args.csv_row_per_doc else "data")
+
+    if not args.csv_row_per_doc and not Path(documents_dir).exists():
+        raise FileNotFoundError(f"--documents-dir 경로를 찾을 수 없습니다: {documents_dir}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -156,14 +175,18 @@ def main() -> None:
     csv_text_columns = args.csv_text_columns.split(",") if args.csv_text_columns else None
     print("[1/3] Load documents...")
     loader = DocumentLoader(
-        documents_dir=args.documents_dir,
+        documents_dir=documents_dir,
         metadata_csv=args.metadata_csv,
         csv_text_columns=csv_text_columns,
         csv_row_per_doc=args.csv_row_per_doc,
     )
     documents = loader.load_all()
     if not documents:
-        raise RuntimeError("No documents loaded. Check --documents-dir.")
+        raise RuntimeError(
+            "No documents loaded. "
+            + ("--metadata-csv의 텍스트 컬럼을 확인하세요." if args.csv_row_per_doc
+               else "--documents-dir을 확인하세요.")
+        )
 
     print("[2/3] Chunk documents...")
     chunks = chunk_documents(
