@@ -39,7 +39,10 @@ with st.sidebar:
     st.divider()
 
     if scenario_key == "B":
-        _collections = ["rfp_chunk1200", "rfp_chunk800", "rfp_documents"]
+        _collections = [
+            "rfp_chunk600",      # CSV 기반 정제 데이터, 600자 (권장)
+            "rfp_chunk1200",     # HWP 원문 추출, 1200자
+        ]
     else:
         _collections = [
             "rfp_chunk1200_a",

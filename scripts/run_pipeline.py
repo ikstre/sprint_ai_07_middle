@@ -24,13 +24,16 @@
   python scripts/run_pipeline.py --steps autorag
 
 사용 가능한 --finetune-models 값 (finetune_capable=True):
-  kanana-nano, kanana-1.5              — 2.1B, 일반 설정
+  [QLoRA 불필요 — BF16 LoRA]
+  kanana-nano, kanana-1.5              — 2.1B
   exaone                               — EXAONE-4.0-1.2B
   exaone-deep-2.4b                     — EXAONE-Deep-2.4B
-  exaone-3.5-7.8b, exaone-deep-7.8b   — 7.8B, --qlora 필수
   midm                                 — Midm-2.0-Mini
-  gemma3                               — Gemma3-4B
-  gemma4                               — Gemma4-E4B, --qlora 권장
+
+  [QLoRA 자동 적용 — 레지스트리 qlora=True]
+  gemma3                               — Gemma3-4B (권장)
+  gemma4                               — Gemma4-E4B (권장)
+  exaone-3.5-7.8b, exaone-deep-7.8b   — 7.8B (필수)
 
 평가 전용 모델 (AutoRAG config에만 추가, 파인튜닝 불가):
   gemma4-26b  — Gemma4-26B-NVFP4, 22GB에서 학습 불가 (추론 전용)
@@ -54,85 +57,95 @@ PYTHON = sys.executable
 # ── 모델 레지스트리 ─────────────────────────────────────────────────
 # short name → 학습/서빙 파라미터
 MODEL_REGISTRY: dict[str, dict] = {
+    # ── 1.2B ~ 2.1B: BF16 LoRA, QLoRA 불필요 ─────────────────────────
     "kanana-nano": {
         "model_path": "/srv/shared_data/models/kanana/kanana-nano-2.1b",
         "trust_remote_code": False,
+        "qlora": False,
         "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
     },
     "kanana-1.5": {
         "model_path": "/srv/shared_data/models/kanana/kanana-1.5-2.1b",
         "trust_remote_code": False,
+        "qlora": False,
         "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
     },
     "exaone": {
         "model_path": "/srv/shared_data/models/exaone/EXAONE-4.0-1.2B",
         "trust_remote_code": True,
+        "qlora": False,
         "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95]},
     },
     "exaone-deep-2.4b": {
         "model_path": "/srv/shared_data/models/exaone/EXAONE-Deep-2.4B",
         "trust_remote_code": True,
+        "qlora": False,
         "finetune": {"batch_size": 2, "grad_accum": 8, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95]},
     },
-    # 7.8B 모델: 22GB GPU에서 QLoRA(--qlora) 필수
+    "midm": {
+        "model_path": "/srv/shared_data/models/midm/Midm-2.0-Mini",
+        "trust_remote_code": False,
+        "qlora": False,
+        "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
+        "vllm": {"temperature": [0.7, 0.8], "top_k": 20, "top_p": [0.80, 0.90]},
+    },
+    # ── 4B: QLoRA 권장 (22GB GPU에서 BF16 LoRA 가능하나 여유 확보) ──────
+    "gemma3": {
+        "model_path": "/srv/shared_data/models/gemma/Gemma3-4B",
+        "trust_remote_code": False,
+        "qlora": True,
+        "finetune_capable": True,
+        "finetune": {"batch_size": 2, "grad_accum": 8, "lora_r": 16},
+        "vllm": {
+            "temperature": [0.9, 1.0],
+            "top_k": 64,
+            "top_p": [0.90, 0.95],
+            "max_model_len": 16384,
+        },
+    },
+    # Gemma4-E4B: 15GB BF16, QLoRA 권장
+    # needs_user_site=True: transformers 5.x(user-local) 필요
+    "gemma4": {
+        "model_path": "/srv/shared_data/models/gemma/Gemma4-E4B",
+        "trust_remote_code": False,
+        "qlora": True,
+        "finetune_capable": True,
+        "needs_user_site": True,
+        "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
+        "vllm": {
+            "temperature": [0.9, 1.0],
+            "top_k": 64,
+            "top_p": [0.90, 0.95],
+            "max_model_len": 16384,
+        },
+    },
+    # ── 7.8B: QLoRA 필수 (22GB GPU에서 BF16 LoRA 불가) ──────────────────
     "exaone-3.5-7.8b": {
         "model_path": "/srv/shared_data/models/exaone/EXAONE-3.5-7.8B",
         "trust_remote_code": True,
+        "qlora": True,
         "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
     },
     "exaone-deep-7.8b": {
         "model_path": "/srv/shared_data/models/exaone/EXAONE-Deep-7.8B",
         "trust_remote_code": True,
+        "qlora": True,
         "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
     },
-    "midm": {
-        "model_path": "/srv/shared_data/models/midm/Midm-2.0-Mini",
-        "trust_remote_code": False,
-        "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
-        "vllm": {"temperature": [0.7, 0.8], "top_k": 20, "top_p": [0.80, 0.90]},
-    },
-    "gemma3": {
-        "model_path": "/srv/shared_data/models/gemma/Gemma3-4B",
-        "trust_remote_code": False,
-        "finetune_capable": True,
-        "finetune": {"batch_size": 2, "grad_accum": 8, "lora_r": 16},
-        "vllm": {
-            "temperature": [0.9, 1.0],
-            "top_k": 64,
-            "top_p": [0.90, 0.95],
-            "max_model_len": 16384,
-        },
-    },
-    # Gemma4-E4B: 15GB BF16, LoRA 학습 가능 (22GB GPU)
-    # finetune 시 QLoRA(--qlora) 권장 — BF16 모드에서 VRAM 여유 확보
-    # needs_user_site=True: Gemma4 아키텍처는 transformers 5.x(user-local) 필요
-    #   → 다른 모델과 달리 PYTHONNOUSERSITE=1 을 설정하지 않고 실행
-    "gemma4": {
-        "model_path": "/srv/shared_data/models/gemma/Gemma4-E4B",
-        "trust_remote_code": False,
-        "finetune_capable": True,
-        "needs_user_site": True,     # user-local transformers 5.x 필요
-        "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
-        "vllm": {
-            "temperature": [0.9, 1.0],
-            "top_k": 64,
-            "top_p": [0.90, 0.95],
-            "max_model_len": 16384,
-        },
-    },
-    # Gemma4-26B-NVFP4: 추론 전용 (22GB에서 LoRA 학습 불가)
-    # AutoRAG config에만 추가됨 — finetune 단계에서는 자동으로 스킵
+    # ── 추론 전용: AutoRAG config에만 추가 ───────────────────────────────
+    # Gemma4-26B-NVFP4: 22GB 초과, LoRA 학습 불가
     "gemma4-26b": {
         "model_path": "/srv/shared_data/models/gemma/Gemma4-26B-NVFP4",
         "trust_remote_code": False,
-        "finetune_capable": False,   # 학습 불가: 22GB 초과
-        "needs_user_site": True,     # user-local transformers 5.x 필요
+        "qlora": False,
+        "finetune_capable": False,
+        "needs_user_site": True,
         "finetune": {},
         "vllm": {
             "temperature": [0.9, 1.0],
@@ -247,6 +260,7 @@ def step_finetune(args: argparse.Namespace) -> list[tuple[str, Path]]:
             "--qa-path", str(ROOT / args.data_dir / "qa.parquet"),
             "--corpus-path", str(ROOT / args.data_dir / "corpus.parquet"),
             "--epochs", str(args.finetune_epochs),
+            "--early-stop-patience", str(args.early_stop_patience),
             "--batch-size", str(ft_params["batch_size"]),
             "--grad-accum", str(ft_params["grad_accum"]),
             "--lora-r", str(ft_params["lora_r"]),
@@ -255,8 +269,10 @@ def step_finetune(args: argparse.Namespace) -> list[tuple[str, Path]]:
         ]
         if reg["trust_remote_code"]:
             cmd.append("--trust-remote-code")
-        if args.qlora:
+        # 레지스트리 기준 QLoRA 적용 (전역 --qlora로 강제 override 가능)
+        if reg.get("qlora", False) or args.qlora:
             cmd.append("--qlora")
+            print(f"  QLoRA: {'레지스트리 설정' if reg.get('qlora') else '--qlora 강제 적용'}")
 
         # 파인튜닝은 trl/bitsandbytes가 user site에 설치되어 있으므로
         # 모든 모델에서 user site 허용 (PYTHONNOUSERSITE 미설정)
@@ -428,6 +444,26 @@ def step_autorag(
             label="Gemma4",
         )
 
+        # ── Group A + B 결과 자동 병합 ──────────────────────────────
+        # Group A 실행 결과가 있을 때만 병합 (autorag 단계에서 Group A도 실행된 경우)
+        main_project = ROOT / args.project_dir
+        if main_project.exists() and (main_project / "0").exists():
+            _section("Gemma4 결과 병합")
+            _run(
+                [
+                    PYTHON, str(ROOT / "scripts/merge_gemma4_results.py"),
+                    "--main-dir", str(main_project),
+                    "--gemma4-dir", str(gemma_project),
+                ],
+                use_user_site=True,
+            )
+        else:
+            print(f"\n[병합 스킵] 메인 trial 없음: {main_project / '0'}")
+            print("  일반 모델 AutoRAG 실행 후 수동으로 병합하세요:")
+            print(f"  python scripts/merge_gemma4_results.py \\")
+            print(f"    --main-dir {main_project} \\")
+            print(f"    --gemma4-dir {gemma_project}")
+
 
 # ── 메인 ───────────────────────────────────────────────────────────
 
@@ -464,12 +500,15 @@ def main() -> None:
         help="파인튜닝할 모델 short name (쉼표 구분). "
              f"선택: {', '.join(MODEL_REGISTRY.keys())}",
     )
-    parser.add_argument("--finetune-epochs", type=int, default=3)
+    parser.add_argument("--finetune-epochs", type=int, default=5,
+                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 5)")
+    parser.add_argument("--early-stop-patience", type=int, default=3,
+                        help="eval_loss 개선 없이 허용할 epoch 수 (0=비활성화, 기본: 3)")
     parser.add_argument("--finetune-lr", type=float, default=2e-4)
     parser.add_argument("--max-seq-length", type=int, default=1024,
                         help="학습 최대 시퀀스 길이 (기본: 1024)")
     parser.add_argument("--qlora", action="store_true",
-                        help="4-bit QLoRA 사용 (8GB GPU 등 메모리 제한 환경)")
+                        help="모든 모델에 QLoRA 강제 적용 (기본: 레지스트리 qlora 필드 자동 적용)")
     parser.add_argument("--force-finetune", action="store_true",
                         help="모델이 이미 학습된 경우에도 재학습")
 
