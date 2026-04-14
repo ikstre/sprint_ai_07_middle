@@ -1,9 +1,20 @@
 """
 Gemma4 별도 실행 결과를 메인 AutoRAG trial에 합치는 스크립트.
 
+Gemma4는 transformers 5.x가 필요해 별도 project dir에서 실행되므로
+generator 노드의 parquet + summary.csv를 메인 trial에 병합합니다.
+prompt_maker 노드는 두 실행 모두 동일한 평가용 LLM(EXAONE-4.0-1.2B)을
+사용하므로 병합 대상에서 제외됩니다.
+
 사용법:
+  # run_pipeline.py 워크플로 (기본)
     python scripts/merge_gemma4_results.py \
-        --main-dir evaluation/autorag_benchmark_local \
+        --main-dir evaluation/autorag_benchmark_csv \
+        --gemma4-dir evaluation/autorag_benchmark_csv_gemma
+
+  # 수동 실행 워크플로 (bash scripts/run_gemma4_optimization.sh)
+    python scripts/merge_gemma4_results.py \
+        --main-dir evaluation/autorag_benchmark_csv \
         --gemma4-dir evaluation/autorag_benchmark_gemma4
 """
 
@@ -91,14 +102,14 @@ def main() -> None:
     parser.add_argument(
         "--main-dir",
         type=str,
-        default="evaluation/autorag_benchmark_local",
-        help="메인 AutoRAG project 디렉토리",
+        default="evaluation/autorag_benchmark_csv",
+        help="메인 AutoRAG project 디렉토리 (기본: evaluation/autorag_benchmark_csv)",
     )
     parser.add_argument(
         "--gemma4-dir",
         type=str,
-        default="evaluation/autorag_benchmark_gemma4",
-        help="Gemma4 전용 AutoRAG project 디렉토리",
+        default="evaluation/autorag_benchmark_csv_gemma",
+        help="Gemma4 전용 AutoRAG project 디렉토리 (기본: evaluation/autorag_benchmark_csv_gemma)",
     )
     parser.add_argument(
         "--trial",

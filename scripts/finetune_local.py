@@ -121,6 +121,41 @@ def build_dataset(
 # 학습
 # ─────────────────────────────────────────────────────────────────
 
+def _cleanup_merged_model(model_dir: Path) -> None:
+    """LoRA merge 후 저장된 모델에서 vLLM 로드 방해 요소 제거.
+
+    save_pretrained()는 merged 모델(model.safetensors)을 올바르게 저장하지만
+    동시에 PEFT 어댑터 파일도 함께 저장한다:
+      - adapter_config.json   → vLLM/transformers가 PEFT 모델로 인식
+      - adapter_model.safetensors  → base_model.* 키 포함 (LoRA 어댑터 원본)
+      - quantization_config in config.json → bitsandbytes loader 선택
+
+    이 세 가지를 제거하면 vLLM이 model.safetensors만 읽고 정상 로드된다.
+    """
+    import json
+
+    # ── 1. adapter_config.json 제거 (PEFT 모델로 오인식 방지) ─────────
+    adapter_config = model_dir / "adapter_config.json"
+    if adapter_config.exists():
+        adapter_config.unlink()
+        print(f"  adapter_config.json 제거")
+
+    # ── 2. adapter_model.safetensors 제거 (LoRA 어댑터 원본 파일) ─────
+    for adapter_shard in model_dir.glob("adapter_model*.safetensors"):
+        adapter_shard.unlink()
+        print(f"  {adapter_shard.name} 제거")
+
+    # ── 3. config.json quantization_config 제거 ──────────────────────
+    config_path = model_dir / "config.json"
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        if cfg.pop("quantization_config", None) is not None:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            print(f"  config.json quantization_config 제거")
+
+
 def _patch_transformers_validation() -> None:
     """transformers 5.x + huggingface_hub strict 검증 우회.
 
@@ -196,7 +231,7 @@ def train(args: argparse.Namespace) -> None:
         import torch
         from datasets import Dataset
         from peft import LoraConfig, TaskType, get_peft_model
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, EarlyStoppingCallback
         from trl import SFTConfig, SFTTrainer
     except ImportError as e:
         print(f"필수 패키지 미설치: {e}")
@@ -275,6 +310,7 @@ def train(args: argparse.Namespace) -> None:
     model.print_trainable_parameters()
 
     # ── 학습 설정 ─────────────────────────────────────────────────
+    use_eval = val_dataset is not None
     sft_config = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=args.epochs,
@@ -287,11 +323,19 @@ def train(args: argparse.Namespace) -> None:
         bf16=torch.cuda.is_bf16_supported(),
         fp16=not torch.cuda.is_bf16_supported(),
         logging_steps=10,
-        eval_strategy="epoch" if val_dataset else "no",
+        eval_strategy="epoch" if use_eval else "no",
         save_strategy="epoch",
-        load_best_model_at_end=val_dataset is not None,
+        save_total_limit=2,                          # 디스크 절약: 최대 2개 체크포인트만 유지
+        load_best_model_at_end=use_eval,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="none",
     )
+
+    callbacks = []
+    if use_eval and args.early_stop_patience > 0:
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.early_stop_patience))
+        print(f"  EarlyStopping 활성화 (patience={args.early_stop_patience} epochs)")
 
     trainer = SFTTrainer(
         model=model,
@@ -299,6 +343,7 @@ def train(args: argparse.Namespace) -> None:
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         processing_class=tokenizer,
+        callbacks=callbacks if callbacks else None,
     )
 
     # Gemma3/4: transformers 5.x에서 학습 시 token_type_ids 필수
@@ -319,16 +364,69 @@ def train(args: argparse.Namespace) -> None:
     print("\n학습 시작...")
     trainer.train()
 
-    # ── 저장 (LoRA 병합 → vLLM 로드 가능한 전체 가중치) ──────────────
-    # trainer.save_model()은 LoRA 어댑터만 저장(config.json 없음) →
-    # vLLM이 로드 불가. merge_and_unload()로 기반 모델에 병합 후 저장.
-    print("\nLoRA 어댑터 병합 중 (기반 모델 + LoRA → BF16/FP16)...")
-    merged = trainer.model.merge_and_unload()
-    merged.save_pretrained(str(output_dir / "final"))
-    tokenizer.save_pretrained(str(output_dir / "final"))
-    print(f"\n학습 완료. 저장 경로: {output_dir / 'final'}")
+    # ── 저장 (2단계: 어댑터 백업 → GPU 해제 → 기반 모델 재로드 → merge) ──
+    # QLoRA 학습 중 모델은 4-bit 상태. merge_and_unload()는 BF16 전체 가중치로
+    # 변환해야 해서 메모리가 2~3배 필요 → 학습 중 상태에서 바로 merge하면 OOM.
+    # 해결: 어댑터만 먼저 저장 → GPU 메모리 해제 → 기반 모델 BF16 재로드 → merge.
+
+    import gc
+    from peft import PeftModel
+
+    # Step 1: 어댑터 저장 (merge 실패해도 repair 가능하도록)
+    adapter_dir = output_dir / "adapter"
+    print(f"\n[1/3] LoRA 어댑터 저장 중: {adapter_dir}")
+    trainer.model.save_pretrained(str(adapter_dir))
+    tokenizer.save_pretrained(str(adapter_dir))
+
+    # Step 2: 학습에 사용한 모델/트레이너 해제 → GPU 메모리 확보
+    print("\n[2/3] GPU 메모리 해제 중...")
+    _train_model = trainer.model
+    del trainer, _train_model
+    gc.collect()
+    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+    # Step 3: 기반 모델 BF16으로 재로드 → 어댑터 로드 → merge
+    print(f"\n[3/3] 기반 모델 재로드 후 LoRA merge 중...")
+    print(f"  기반 모델: {args.model_path}")
+    _dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    _base = AutoModelForCausalLM.from_pretrained(
+        args.model_path,
+        torch_dtype=_dtype,
+        device_map="auto",
+        trust_remote_code=args.trust_remote_code,
+    )
+    _peft = PeftModel.from_pretrained(_base, str(adapter_dir))
+    merged = _peft.merge_and_unload()
+
+    if hasattr(merged, "config") and hasattr(merged.config, "quantization_config"):
+        merged.config.quantization_config = None
+
+    final_dir = output_dir / "final"
+    merged.save_pretrained(str(final_dir))
+
+    # QLoRA: save_pretrained()가 model.safetensors를 생성하지 않는 경우 직접 저장
+    if not list(final_dir.glob("model*.safetensors")):
+        print("  [경고] model.safetensors 없음 → PreTrainedModel 직접 저장...")
+        from transformers import PreTrainedModel as _PTM
+        _actual = (merged.base_model.model
+                   if hasattr(merged, "base_model") and hasattr(merged.base_model, "model")
+                   else merged)
+        if hasattr(_actual, "config") and hasattr(_actual.config, "quantization_config"):
+            _actual.config.quantization_config = None
+        _PTM.save_pretrained(_actual, str(final_dir))
+
+    tokenizer.save_pretrained(str(final_dir))
+
+    # 저장 후처리: quantization_config 잔류 / adapter 파일 제거
+    # (일부 PEFT 버전에서 merge 후에도 두 아티팩트가 잔류해 vLLM 로드 실패)
+    print("\n저장 후처리 (vLLM 호환성 보장)...")
+    _cleanup_merged_model(final_dir)
+
+    print(f"\n학습 완료. 저장 경로: {final_dir}")
     print("\nvLLM 서빙 방법:")
-    print(f"  python -m vllm.entrypoints.openai.api_server --model {output_dir / 'final'} --port 8001")
+    print(f"  python -m vllm.entrypoints.openai.api_server --model {final_dir} --port 8001")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -345,7 +443,10 @@ def main() -> None:
                         help="Corpus parquet 경로 (기본: data/autorag_csv/corpus.parquet)")
     parser.add_argument("--qlora", action="store_true", help="4-bit QLoRA 사용 (VRAM 절약)")
     parser.add_argument("--trust-remote-code", action="store_true", help="EXAONE 등 커스텀 코드 모델")
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=5,
+                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 5)")
+    parser.add_argument("--early-stop-patience", type=int, default=3,
+                        help="eval_loss 개선 없이 허용할 epoch 수 (0=비활성화, 기본: 3)")
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--grad-accum", type=int, default=8, help="Gradient accumulation steps")
     parser.add_argument("--lr", type=float, default=2e-4)

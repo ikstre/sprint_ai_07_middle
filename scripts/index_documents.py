@@ -9,6 +9,12 @@
   python scripts/index_documents.py --step chunk            # 1단계만
   python scripts/index_documents.py --step embed            # 2단계만 (청크 파일 재사용)
   python scripts/index_documents.py --collection rfp_chunk800 --chunk-size 800
+
+  # corpus.parquet 직접 임베딩 (CSV 기반 정제 데이터 → Scenario B 컬렉션 생성)
+  python scripts/index_documents.py \\
+    --scenario B \\
+    --from-parquet data/autorag_csv/corpus.parquet \\
+    --collection rfp_chunk600
 """
 import json
 import os
@@ -78,6 +84,51 @@ def step_chunk(args, config: Config) -> Path:
     print(f"\n청크 저장 완료: {chunk_file}")
     print(f"  총 문서: {len(documents)}개 | 총 청크: {len(chunks)}개")
     return chunk_file
+
+
+def step_from_parquet(parquet_path: str) -> list[dict]:
+    """corpus.parquet → 청크 리스트 변환.
+
+    prepare_autorag_from_csv.py 가 생성한 corpus.parquet을 읽어
+    index_documents.py 의 청크 형식(text/metadata dict 리스트)으로 변환한다.
+    HWP 추출 없이 정제된 CSV 기반 데이터를 그대로 임베딩에 사용할 수 있다.
+
+    Args:
+        parquet_path: corpus.parquet 경로 (컬럼: doc_id, contents, metadata, path, start_end_idx)
+
+    Returns:
+        [{"text": str, "metadata": {str: str}}, ...]
+    """
+    import pandas as pd
+
+    path = Path(parquet_path)
+    if not path.exists():
+        print(f"[오류] parquet 파일을 찾을 수 없습니다: {path}")
+        sys.exit(1)
+
+    df = pd.read_parquet(path)
+    print(f"  parquet 로딩 완료: {len(df)}행 ({path})")
+
+    chunks: list[dict] = []
+    for _, row in df.iterrows():
+        meta = row.get("metadata", {})
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        elif not isinstance(meta, dict):
+            meta = {}
+
+        # doc_id를 메타데이터에 포함
+        meta["doc_id"] = str(row.get("doc_id", ""))
+
+        chunks.append({
+            "text": str(row["contents"]),
+            "metadata": {k: str(v) for k, v in meta.items()},
+        })
+
+    return chunks
 
 
 def step_embed(args, config: Config, chunk_file: Path):
@@ -159,6 +210,14 @@ def main():
         "--csv-row-per-doc", action="store_true",
         help="CSV 각 행을 개별 문서로 처리. 미지정 시 CSV 전체를 하나의 문서로 처리.",
     )
+    parser.add_argument(
+        "--from-parquet", type=str, default=None,
+        help=(
+            "corpus.parquet 경로를 직접 지정해 임베딩 (청킹 단계 생략).\n"
+            "prepare_autorag_from_csv.py 로 생성한 정제 데이터를 그대로 사용.\n"
+            "예: --from-parquet data/autorag_csv/corpus.parquet"
+        ),
+    )
     args = parser.parse_args()
 
     # Scenario A 임베딩 모델 경로 및 차원 결정
@@ -167,9 +226,13 @@ def main():
 
     print("=" * 60)
     print("RFP 문서 인덱싱")
-    print(f"  단계      : {args.step}")
+    if args.from_parquet:
+        print(f"  모드      : parquet 직접 임베딩 (청킹 생략)")
+        print(f"  입력      : {args.from_parquet}")
+    else:
+        print(f"  단계      : {args.step}")
+        print(f"  청킹 전략 : {args.method} | 크기: {args.chunk_size} | 중첩: {args.chunk_overlap}")
     print(f"  시나리오  : {args.scenario}")
-    print(f"  청킹 전략 : {args.method} | 크기: {args.chunk_size} | 중첩: {args.chunk_overlap}")
     print(f"  컬렉션    : {args.collection}")
     print(f"  Batch API : {'ON' if args.use_batch_api else 'OFF'}")
     if args.scenario == "A":
@@ -190,7 +253,18 @@ def main():
 
     chunk_file = Path(config.processed_dir) / f"{args.collection}_chunks.json"
 
-    if args.step == "chunk":
+    if args.from_parquet:
+        # parquet → 청크 변환 → JSON 캐시 → 임베딩
+        print("\n[1/2] parquet → 청크 변환 중...")
+        chunks = step_from_parquet(args.from_parquet)
+        chunks = _sanitize_chunks(chunks)
+        Path(config.processed_dir).mkdir(parents=True, exist_ok=True)
+        with open(chunk_file, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, ensure_ascii=False, indent=2)
+        print(f"  청크 캐시 저장: {chunk_file} ({len(chunks)}개)")
+        print("\n[2/2] 임베딩 및 벡터스토어 저장 중...")
+        step_embed(args, config, chunk_file)
+    elif args.step == "chunk":
         step_chunk(args, config)
     elif args.step == "embed":
         step_embed(args, config, chunk_file)
