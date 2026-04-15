@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+myenv/
 
 # Raw input data (do not commit)
 data/
@@ -19,6 +20,7 @@ __pycache__/
 *.pyc
 *.pyo
 .ipynb_checkpoints/
+evaluation/eval_results.json
 
 # Logs
 *.log
