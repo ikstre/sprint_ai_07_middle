@@ -11,7 +11,8 @@ from typing import Optional
 import pandas as pd
 
 from configs.config import Config
-from src.evaluation.dataset import EVALUATION_QUESTIONS, LLM_JUDGE_PROMPT
+from src.evaluation.single_dataset import EVALUATION_QUESTIONS
+from src.evaluation.dataset import LLM_JUDGE_PROMPT
 from src.evaluation.generation_metrics import GenerationMetricSuite
 from src.evaluation.grounding_metrics import compute_decline_accuracy, compute_grounding_metrics
 from src.evaluation.retrieval_metrics import compute_retrieval_metrics
