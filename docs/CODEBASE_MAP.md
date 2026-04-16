@@ -22,6 +22,25 @@
 
 ## 핵심 모듈
 
+### `configs/paths.py`
+중앙 경로 레지스트리. `.env`의 환경변수를 읽어 **모든 경로를 한 곳에서 관리**합니다.
+
+| 환경변수 | 기본값 | 역할 |
+|---------|--------|------|
+| `SRV_DATA_DIR` | `/srv/shared_data` | 서버 루트 |
+| `METADATA_CSV` | `{SRV_DATA_DIR}/datasets/data_list_cleaned.csv` | 메타데이터 CSV |
+| `MODEL_DIR` | `{SRV_DATA_DIR}/models` | 모델 루트 |
+| `EMBEDDING_MODEL_PATH` | `{MODEL_DIR}/embeddings/BGE-m3-ko` | 임베딩 모델 |
+| `CHAT_MODEL_PATH` | `{MODEL_DIR}/exaone/EXAONE-4.0-1.2B` | 채팅 모델 |
+| `VECTORDB_DIR` | `data/vectordb` | 로컬 ChromaDB |
+| `AUTORAG_DATA_DIR` | `data/autorag_csv` | AutoRAG parquet |
+| `AUTORAG_PROJECT_DIR` | `evaluation/autorag_benchmark_csv` | AutoRAG 결과 |
+
+> 서버 경로 변경 시 `.env`에 `SRV_DATA_DIR=/new/path` 한 줄만 추가하면 모든 스크립트에 즉시 반영됩니다.
+> `configs/config.py`, `app.py`, `run_pipeline.py`, `run_evaluation.py`, `index_documents.py`, `prepare_autorag_from_csv.py` 모두 이 모듈을 참조합니다.
+
+---
+
 ### `configs/config.py`
 전체 런타임 설정. 주요 필드:
 
@@ -36,9 +55,9 @@
   - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (50)
   - `max_tokens`: 16000 (reasoning 토큰 포함 충분히 확보)
 - **Scenario A 전용**
-  - `hf_embedding_model`: `/srv/shared_data/models/embeddings/BGE-m3-ko` (기본값)
+  - `hf_embedding_model`: `paths.EMBEDDING_MODEL_PATH` 기본값 (`.env`의 `EMBEDDING_MODEL_PATH` → `{MODEL_DIR}/embeddings/BGE-m3-ko`)
   - `hf_embedding_dim`: 1024 (BGE-m3-ko) / 768 (ko-sroberta)
-  - `hf_chat_model`: `/srv/shared_data/models/exaone/EXAONE-4.0-1.2B` (기본값)
+  - `hf_chat_model`: `paths.CHAT_MODEL_PATH` 기본값 (`.env`의 `CHAT_MODEL_PATH` → `{MODEL_DIR}/exaone/EXAONE-4.0-1.2B`)
   - `hf_token`: 로컬 모델은 빈 문자열로도 동작 (Hub 비공개 모델만 필요)
   - `device`: "auto" — cuda → mps → cpu 자동 감지
   - `hf_max_new_tokens`: 1024 (HF 생성 전용, OpenAI max_tokens와 분리)
@@ -162,7 +181,9 @@ AutoRAG 최적화 실행 + 세 가지 내장 패치:
 - `kv_cache_dtype: auto` (GPU 아키텍처 자동 감지)
 - Gemma3-4B 제외 (8.1G > 한도)
 
-### 서버 저장 모델 현황 (`/srv/shared_data/models/`)
+### 서버 저장 모델 현황 (`$MODEL_DIR` — 기본: `/srv/shared_data/models/`)
+
+> `.env`의 `SRV_DATA_DIR` 또는 `MODEL_DIR` 변수로 루트 경로를 변경할 수 있습니다.
 
 | 디렉토리 | 모델명 | 크기 | 22GB 로드 |
 |---------|--------|------|----------|
@@ -284,3 +305,6 @@ OpenAI Fine-tuning API 래퍼.
 - AutoRAG Gemma4 모델 변경: `configs/autorag/local_gemma4.yaml` 수정 후 `bash scripts/run_gemma4_optimization.sh`
 - AutoRAG 새 임베딩 추가: `configs/autorag/local.yaml`과 `local_gemma4.yaml` 양쪽의 `vectordb` + `semantic_retrieval.modules`에 추가, `scripts/download_models.py`에 다운로드 항목 추가
 - AutoRAG ChromaDB 관련 오류: `scripts/run_autorag_optimization.py`의 패치 함수 확인
+- 서버 경로 변경: `.env`의 `SRV_DATA_DIR` 수정 → `configs/paths.py`가 모든 하위 경로 자동 파생
+- 모델 경로만 변경: `.env`의 `MODEL_DIR` 또는 개별 `CHAT_MODEL_PATH`/`EMBEDDING_MODEL_PATH` 수정
+- AutoRAG YAML 모델 경로 변경: `${SRV_DATA_DIR}` 플레이스홀더가 `run_pipeline.py`의 `_resolve_yaml_env()`에서 자동 치환됨

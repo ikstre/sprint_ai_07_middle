@@ -15,6 +15,9 @@ data/vectordb/
 # Evaluation outputs (project-root only)
 /evaluation/
 
+# Finetuned model weights (large binary files — use NAS or shared storage)
+models/finetuned/
+
 # Python cache
 __pycache__/
 *.pyc

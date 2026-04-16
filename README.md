@@ -56,7 +56,8 @@
 
 ### 공통 모듈
 
-- 설정: `configs/config.py`
+- 경로 설정: `configs/paths.py` — `.env` 환경변수 기반 중앙 경로 레지스트리
+- 런타임 설정: `configs/config.py`
 - 로딩/청킹/검색/생성: `src/document_loader.py`, `src/chunker.py`, `src/embedder.py`, `src/retriever.py`, `src/generator.py`
 - 오케스트레이션: `src/rag_pipeline.py`
 
@@ -220,8 +221,9 @@ pip install peft trl bitsandbytes accelerate datasets
 
 설치 이슈 메모:
 - HWP 파싱은 `olefile` + 내부 파서(`src/document_loader.py`)로 동작합니다.
-- Scenario A 로컬 모델은 `/srv/shared_data/models/`에서 직접 로드하며 HF_TOKEN이 불필요합니다.
+- Scenario A 로컬 모델은 `$MODEL_DIR`(`.env`의 `SRV_DATA_DIR` 기반, 기본: `/srv/shared_data/models/`)에서 직접 로드하며 HF_TOKEN이 불필요합니다.
 - 로컬 PC에서는 HuggingFace Hub에서 자동 다운로드됩니다 (`HF_HOME` 환경변수로 캐시 경로 지정 가능).
+- 모든 경로는 `configs/paths.py`에서 중앙 관리합니다. `.env`에 `SRV_DATA_DIR`만 추가하면 전체 스크립트에 반영됩니다.
 
 ## 3) 현재 검증 상태와 주의사항
 

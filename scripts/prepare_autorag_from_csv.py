@@ -10,7 +10,7 @@ data_list_cleaned.csv → corpus.parquet + qa.parquet
 
 실행 예시:
   python scripts/prepare_autorag_from_csv.py \\
-    --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \\
+    --csv-path $METADATA_CSV \\
     --output-dir data/autorag_csv \\
     --chunk-size 600 \\
     --chunk-overlap 100
@@ -28,6 +28,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
+load_dotenv()
+
+from configs import paths
 from src.chunker import naive_chunk
 from src.document_loader import clean_text, apply_filter
 
@@ -305,14 +309,14 @@ def main() -> None:
     parser.add_argument(
         "--csv-path",
         type=str,
-        default="/srv/shared_data/datasets/data_list_cleaned.csv",
-        help="입력 CSV 파일 경로",
+        default=paths.METADATA_CSV,
+        help=f"입력 CSV 파일 경로 (기본: {paths.METADATA_CSV})",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="data/autorag_csv",
-        help="출력 디렉토리 (corpus.parquet, qa.parquet 저장 위치)",
+        default=paths.AUTORAG_DATA_DIR,
+        help=f"출력 디렉토리 (corpus.parquet, qa.parquet 저장 위치, 기본: {paths.AUTORAG_DATA_DIR})",
     )
     parser.add_argument(
         "--chunk-size",
