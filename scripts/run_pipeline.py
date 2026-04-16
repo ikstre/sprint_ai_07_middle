@@ -404,22 +404,38 @@ def _autorag_run(
 
 
 def _resolve_yaml_env(config_path: Path) -> Path:
-    """YAML 내 ${SRV_DATA_DIR} 등 환경변수 플레이스홀더를 실제 값으로 치환.
+    """YAML 내 ${SRV_DATA_DIR} 등 우리 플레이스홀더를 실제 경로로 치환.
 
-    치환이 필요 없으면 원본 경로를 그대로 반환.
+    - ${SRV_DATA_DIR}, ${MODEL_DIR} 등은 paths.py 기본값으로 치환
+    - ${PROJECT_DIR}는 AutoRAG가 런타임에 직접 처리하므로 건드리지 않음
     치환이 필요하면 임시 파일에 저장 후 그 경로를 반환.
     """
     import re
     import tempfile
 
+    # AutoRAG 자체 변수는 제외하고 우리 변수만 처리
+    _AUTORAG_VARS = {"PROJECT_DIR"}
+
+    # paths.py 기본값을 우선 사용 (.env 미설정 시에도 정상 동작)
+    _OUR_VARS: dict[str, str] = {
+        "SRV_DATA_DIR": paths.SRV_DATA_DIR,
+        "MODEL_DIR":    paths.MODEL_DIR,
+        "METADATA_CSV": paths.METADATA_CSV,
+        "VECTORDB_DIR": paths.VECTORDB_DIR,
+    }
+
     content = config_path.read_text(encoding="utf-8")
 
     def _sub(m: re.Match) -> str:
         key = m.group(1)
+        if key in _AUTORAG_VARS:
+            return m.group(0)          # AutoRAG 전용 변수는 그대로 유지
+        if key in _OUR_VARS:
+            return _OUR_VARS[key]
+        # 나머지는 환경변수에서 탐색, 없으면 원본 유지
         val = os.getenv(key)
         if val is None:
-            # 환경변수 미설정 시 경고만 출력하고 원본 유지
-            print(f"  [경고] 환경변수 미설정: ${{{key}}} — .env 확인 필요")
+            print(f"  [경고] 알 수 없는 플레이스홀더: ${{{key}}} — 치환 생략")
             return m.group(0)
         return val
 
@@ -434,7 +450,7 @@ def _resolve_yaml_env(config_path: Path) -> Path:
     )
     tmp.write(replaced)
     tmp.close()
-    print(f"  환경변수 치환 완료: {config_path.name} → {tmp.name}")
+    print(f"  경로 치환 완료 ({paths.SRV_DATA_DIR}): {config_path.name} → {tmp.name}")
     return Path(tmp.name)
 
 
@@ -699,7 +715,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # 단계 파싱
-    if args.steps.strip().lower() == "all":
+    _is_all = args.steps.strip().lower() == "all"
+    if _is_all:
         steps = {"data", "index", "finetune", "autorag", "post_eval"}
     else:
         steps = {s.strip().lower() for s in args.steps.split(",")}
@@ -709,6 +726,11 @@ def main() -> None:
     if invalid:
         print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: {', '.join(sorted(valid_steps))}, all")
         sys.exit(1)
+
+    # --steps all 이고 --finetune-models 미지정이면 레지스트리 전체 모델 자동 포함
+    if _is_all and not args.finetune_models.strip():
+        args.finetune_models = ",".join(MODEL_REGISTRY.keys())
+        print(f"[all 모드] 파인튜닝 모델 자동 선택: {args.finetune_models}")
 
     # 지정 모델 분류: 학습 가능 / 평가 전용
     requested_models = [m.strip() for m in args.finetune_models.split(",") if m.strip()]
