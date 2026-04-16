@@ -74,11 +74,9 @@ with st.sidebar:
         _LOCAL_CHAT_MODELS = {
             "EXAONE-4.0-1.2B  (2.4G, 빠름)":          "/srv/shared_data/models/exaone/EXAONE-4.0-1.2B",
             "EXAONE-Deep-2.4B (4.5G, 균형)":           "/srv/shared_data/models/exaone/EXAONE-Deep-2.4B",
-            "EXAONE-3.5-7.8B  (30G,  고성능)":         "/srv/shared_data/models/exaone/EXAONE-3.5-7.8B",
             "EXAONE-Deep-7.8B (15G,  고성능)":         "/srv/shared_data/models/exaone/EXAONE-Deep-7.8B",
             "Gemma3-4B        (8.1G, 다국어)":          "/srv/shared_data/models/gemma/Gemma3-4B",
             "Gemma4-E4B       (15G,  다국어)":          "/srv/shared_data/models/gemma/Gemma4-E4B",
-            "kanana-nano-2.1b (4.0G, 경량)":           "/srv/shared_data/models/kanana/kanana-nano-2.1b",
             "kanana-1.5-2.1b  (4.4G, 경량)":           "/srv/shared_data/models/kanana/kanana-1.5-2.1b",
             "Midm-2.0-Mini    (4.4G, 경량)":           "/srv/shared_data/models/midm/Midm-2.0-Mini",
         }
@@ -184,7 +182,7 @@ def _pipeline_signature() -> tuple:
 def _build_config() -> Config:
     base = dict(
         scenario=scenario_key,
-        metadata_csv="data/data_list.csv",
+        metadata_csv="/srv/shared_data/datasets/data_list_cleaned.csv",
         vectordb_dir="data/vectordb",
         retrieval_method=retrieval_method,
         retrieval_top_k=top_k,

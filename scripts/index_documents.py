@@ -242,7 +242,7 @@ def main():
     config = Config(
         scenario=args.scenario,
         documents_dir=args.documents_dir,
-        metadata_csv="data/data_list.csv",
+        metadata_csv="/srv/shared_data/datasets/data_list_cleaned.csv",
         vectordb_dir="data/vectordb",
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,

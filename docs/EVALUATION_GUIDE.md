@@ -10,6 +10,12 @@
   - 기본값: `LLM Judge ON`, `BERTScore ON`, `Gate OFF(auto)`.
   - 비용이 더 들지만 원인 분석 가능.
 
+## 현재 범위
+
+- `scripts/run_evaluation.py`, `scripts/check_release_gate.py`는 현재 구현상 **서비스형 RAG(B안)** 기준으로 동작합니다.
+- A안은 이 문서의 평가 스크립트보다 `scripts/run_autorag_optimization.py` 또는 `scripts/run_pipeline.py` 경로가 중심입니다.
+- 따라서 A안 AutoRAG 결과를 이 문서의 gate 체계와 동일하게 해석하면 안 됩니다.
+
 ## 실행 커맨드
 - 릴리즈 게이트 원커맨드 (권장)
 ```bash
@@ -33,6 +39,7 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 
 ## Gate 리포트
 - 기본 Gate 임계값은 코드 내 `DEFAULT_CORE_GATE_THRESHOLDS`를 사용합니다.
+- 기본 평가 컬렉션은 코드상 `rfp_documents`/B안 설정에 가까우므로, 실행 전 실제 인덱스 상태를 확인해야 합니다.
 - 파일 기반 임계값 오버라이드:
 ```bash
 python scripts/run_evaluation.py \

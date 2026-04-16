@@ -30,7 +30,7 @@
 
 ## Python 버전 권장 매트릭스
 - 기본 RAG 서비스/평가: Python `3.14` 가능 (`requirements.txt`)
-- AutoRAG 실험: Python `3.11` 또는 `3.12` 권장 (`requirements.txt`에서 자동 설치 분기)
+- AutoRAG 실험: Python `3.11` 또는 `3.12` 권장 (`requirements-autorag.txt` 별도 설치 권장)
 
 ## 장애 대응 포인트
 - 인덱스 누락/불일치: `scripts/index_documents.py` 재실행 후 컬렉션 카운트 확인.

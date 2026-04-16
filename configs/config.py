@@ -16,7 +16,7 @@ class Config:
     # ── 데이터 경로 ────────────────────────────────────────────────
     documents_dir: str = "data/documents"
     processed_dir: str = "data/processed"
-    metadata_csv: str = "data/data_list.csv"
+    metadata_csv: str = "/srv/shared_data/datasets/data_list_cleaned.csv"
     vectordb_dir: str = "data/vectordb"
 
     # ── 시나리오 B: OpenAI API 설정 ────────────────────────────────

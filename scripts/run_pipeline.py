@@ -9,23 +9,23 @@
 파인튜닝이 포함되면 완료된 모델을 AutoRAG config에 자동으로 추가합니다.
 
 사용 예:
-  # 전체: 데이터 + 파인튜닝(2종) + AutoRAG
+  # 전체: 데이터 + 파인튜닝 + AutoRAG
   python scripts/run_pipeline.py --steps all \\
-    --finetune-models kanana-nano,exaone
+    --finetune-models kanana-1.5,exaone
 
   # 데이터 준비 + AutoRAG (파인튜닝 생략)
   python scripts/run_pipeline.py --steps data,autorag
 
   # 파인튜닝 + AutoRAG (데이터 이미 준비됨)
   python scripts/run_pipeline.py --steps finetune,autorag \\
-    --finetune-models kanana-nano
+    --finetune-models kanana-1.5
 
   # AutoRAG만
   python scripts/run_pipeline.py --steps autorag
 
 사용 가능한 --finetune-models 값 (finetune_capable=True):
   [QLoRA 불필요 — BF16 LoRA]
-  kanana-nano, kanana-1.5              — 2.1B
+  kanana-1.5                           — 2.1B
   exaone                               — EXAONE-4.0-1.2B
   exaone-deep-2.4b                     — EXAONE-Deep-2.4B
   midm                                 — Midm-2.0-Mini
@@ -35,8 +35,6 @@
   gemma4                               — Gemma4-E4B (권장)
   exaone-3.5-7.8b, exaone-deep-7.8b   — 7.8B (필수)
 
-평가 전용 모델 (AutoRAG config에만 추가, 파인튜닝 불가):
-  gemma4-26b  — Gemma4-26B-NVFP4, 22GB에서 학습 불가 (추론 전용)
 """
 
 from __future__ import annotations
@@ -58,13 +56,6 @@ PYTHON = sys.executable
 # short name → 학습/서빙 파라미터
 MODEL_REGISTRY: dict[str, dict] = {
     # ── 1.2B ~ 2.1B: BF16 LoRA, QLoRA 불필요 ─────────────────────────
-    "kanana-nano": {
-        "model_path": "/srv/shared_data/models/kanana/kanana-nano-2.1b",
-        "trust_remote_code": False,
-        "qlora": False,
-        "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
-        "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
-    },
     "kanana-1.5": {
         "model_path": "/srv/shared_data/models/kanana/kanana-1.5-2.1b",
         "trust_remote_code": False,
@@ -124,35 +115,13 @@ MODEL_REGISTRY: dict[str, dict] = {
         },
     },
     # ── 7.8B: QLoRA 필수 (22GB GPU에서 BF16 LoRA 불가) ──────────────────
-    "exaone-3.5-7.8b": {
-        "model_path": "/srv/shared_data/models/exaone/EXAONE-3.5-7.8B",
-        "trust_remote_code": True,
-        "qlora": True,
-        "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
-        "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
-    },
+    # exaone-3.5-7.8b: 디스크 용량 제한으로 파인튜닝 제외 (추론 전용 base 모델만 유지)
     "exaone-deep-7.8b": {
         "model_path": "/srv/shared_data/models/exaone/EXAONE-Deep-7.8B",
         "trust_remote_code": True,
         "qlora": True,
         "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
-    },
-    # ── 추론 전용: AutoRAG config에만 추가 ───────────────────────────────
-    # Gemma4-26B-NVFP4: 22GB 초과, LoRA 학습 불가
-    "gemma4-26b": {
-        "model_path": "/srv/shared_data/models/gemma/Gemma4-26B-NVFP4",
-        "trust_remote_code": False,
-        "qlora": False,
-        "finetune_capable": False,
-        "needs_user_site": True,
-        "finetune": {},
-        "vllm": {
-            "temperature": [0.9, 1.0],
-            "top_k": 64,
-            "top_p": [0.90, 0.95],
-            "max_model_len": 8192,
-        },
     },
 }
 
@@ -405,7 +374,7 @@ def step_autorag(
 
     # ── 모델을 두 그룹으로 분리 ─────────────────────────────────────
     # group A: PYTHONNOUSERSITE=1  (kanana / midm / exaone / gemma3 등)
-    # group B: user-local site 허용 (gemma4 / gemma4-26b — transformers 5.x 필요)
+    # group B: user-local site 허용 (gemma4 — transformers 5.x 필요)
 
     ft_normal  = [(n, p) for n, p in finetuned  if not MODEL_REGISTRY[n].get("needs_user_site")]
     ft_gemma   = [(n, p) for n, p in finetuned  if     MODEL_REGISTRY[n].get("needs_user_site")]
@@ -465,6 +434,111 @@ def step_autorag(
             print(f"    --gemma4-dir {gemma_project}")
 
 
+# ── Step 5: AutoRAG 결과 → run_evaluation.py 자동 실행 ──────────────
+
+# AutoRAG 모듈명 → 우리 retrieval_method 매핑
+_AUTORAG_METHOD_MAP: dict[str, str] = {
+    "bm25":       "hybrid",      # BM25 단독 → 가장 가까운 hybrid
+    "vectordb":   "similarity",  # 순수 벡터 → similarity
+    "hybrid_rrf": "hybrid",
+    "hybrid_cc":  "hybrid",
+}
+
+
+def _read_best_retrieval(trial_dir: Path) -> tuple[str, int]:
+    """AutoRAG retrieve_node_line summary.csv에서 최고 성능 모듈과 top_k를 반환한다.
+
+    Returns:
+        (retrieval_method, top_k)  — 기본값 ("similarity", 5)
+    """
+    import ast
+    import pandas as pd
+
+    best_method = "similarity"
+    best_top_k = 5
+    best_score = -1.0
+
+    retrieve_dir = trial_dir / "retrieve_node_line"
+    if not retrieve_dir.exists():
+        print(f"  [경고] retrieve_node_line 없음: {retrieve_dir}")
+        return best_method, best_top_k
+
+    for summary_csv in retrieve_dir.rglob("summary.csv"):
+        try:
+            df = pd.read_csv(summary_csv)
+        except Exception:
+            continue
+
+        # 지표: retrieval_f1 → retrieval_ndcg → retrieval_map 순으로 시도
+        score_col = next(
+            (c for c in ["retrieval_f1", "retrieval_ndcg", "retrieval_map"] if c in df.columns),
+            None,
+        )
+        if score_col is None:
+            continue
+
+        best_row = df.loc[df[score_col].idxmax()]
+        score = float(best_row[score_col])
+
+        if score <= best_score:
+            continue
+
+        # module_name 파싱 (patch로 model basename일 수도 있음)
+        raw_name = str(best_row.get("module_name", "")).lower()
+        method = next(
+            (v for k, v in _AUTORAG_METHOD_MAP.items() if k in raw_name),
+            "similarity",
+        )
+
+        # top_k 파싱 (module_params JSON에서 추출)
+        top_k = 5
+        try:
+            params = best_row.get("module_params", "{}")
+            if isinstance(params, str):
+                params = ast.literal_eval(params)
+            top_k = int(params.get("top_k", 5))
+        except Exception:
+            pass
+
+        best_score = score
+        best_method = method
+        best_top_k = top_k
+
+    print(f"  AutoRAG 최적 검색 방식: {best_method} | top_k={best_top_k} | score={best_score:.4f}")
+    return best_method, best_top_k
+
+
+def step_post_eval(args: argparse.Namespace) -> None:
+    """AutoRAG 결과에서 최적 검색 설정을 읽어 run_evaluation.py를 자동 실행한다."""
+    _section("Step 4 / post_eval — AutoRAG 최적 config로 RAG 평가")
+
+    trial_dir = ROOT / args.project_dir / "0"
+    if not trial_dir.exists():
+        print(f"  [스킵] AutoRAG 결과 없음: {trial_dir}")
+        print("  autorag 단계를 먼저 실행하세요.")
+        return
+
+    best_method, best_top_k = _read_best_retrieval(trial_dir)
+
+    output_dir = ROOT / "evaluation" / "post_autorag"
+    cmd = [
+        PYTHON, str(ROOT / "scripts/run_evaluation.py"),
+        "--mode", "core",
+        "--collection", args.eval_collection,
+        "--output-dir", str(output_dir),
+    ]
+
+    print(f"  retrieval_method={best_method} | top_k={best_top_k} | collection={args.eval_collection}")
+    print(f"  출력 디렉토리: {output_dir}")
+
+    # run_evaluation.py는 내부적으로 4가지 config를 돌리므로
+    # best config만 추가로 출력 알림
+    print(f"\n  ※ run_evaluation.py는 4가지 검색 config를 비교 실행합니다.")
+    print(f"    AutoRAG 추천 best: {best_method} top_k={best_top_k}")
+
+    _run(cmd, use_user_site=False)
+
+
 # ── 메인 ───────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -480,7 +554,7 @@ def main() -> None:
         default="all",
         help=(
             "실행할 단계 (쉼표 구분 또는 'all'). "
-            "선택: data, finetune, autorag. 기본: all"
+            "선택: data, finetune, autorag, post_eval. 기본: all"
         ),
     )
 
@@ -518,17 +592,24 @@ def main() -> None:
     parser.add_argument("--project-dir", default="evaluation/autorag_benchmark_csv",
                         help="AutoRAG 결과 저장 디렉토리")
 
+    # post_eval 옵션
+    parser.add_argument(
+        "--eval-collection",
+        default="rfp_chunk600",
+        help="post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk600)",
+    )
+
     args = parser.parse_args()
 
     # 단계 파싱
     if args.steps.strip().lower() == "all":
-        steps = {"data", "finetune", "autorag"}
+        steps = {"data", "finetune", "autorag", "post_eval"}
     else:
         steps = {s.strip().lower() for s in args.steps.split(",")}
 
-    invalid = steps - {"data", "finetune", "autorag"}
+    invalid = steps - {"data", "finetune", "autorag", "post_eval"}
     if invalid:
-        print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: data, finetune, autorag, all")
+        print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: data, finetune, autorag, post_eval, all")
         sys.exit(1)
 
     # 지정 모델 분류: 학습 가능 / 평가 전용
@@ -565,6 +646,9 @@ def main() -> None:
     if "autorag" in steps:
         step_autorag(args, finetuned, eval_only_models)
 
+    if "post_eval" in steps:
+        step_post_eval(args)
+
     _section("파이프라인 완료")
     if finetuned:
         print(f"학습된 모델:")
@@ -585,6 +669,9 @@ def main() -> None:
             gemma_trial = ROOT / (args.project_dir + "_gemma") / "0"
             print(f"\nAutoRAG 결과 (Gemma4): {ROOT / (args.project_dir + '_gemma')}")
             print(f"  대시보드: autorag dashboard --trial_dir {gemma_trial}")
+
+    if "post_eval" in steps:
+        print(f"\npost_eval 결과: {ROOT / 'evaluation' / 'post_autorag'}")
 
 
 if __name__ == "__main__":

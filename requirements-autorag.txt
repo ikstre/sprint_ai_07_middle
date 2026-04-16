@@ -12,13 +12,14 @@
 # ============================================================
 
 # AutoRAG 및 호환 생태계
-AutoRAG==0.3.21
-langchain-community==0.2.19
-langchain-text-splitters>=0.2.0,<0.3.0
-openai>=1.40.0,<2.0.0
+AutoRAG==0.3.22
+langchain-community>=0.4.0
+langchain-text-splitters>=1.1.1
+openai>=2.30.0
 
 # 기본 유틸리티
 pandas>=2.2.0
-numpy>=1.26.0
+numpy>=2.0.0
 python-dotenv>=1.0.0
 tqdm>=4.66.0
+pyarrow>=16.0.0

@@ -212,6 +212,89 @@ def build_qa(df: pd.DataFrame, corpus_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────
+# 수동 평가셋 → AutoRAG QA 변환
+# ─────────────────────────────────────────────────────────────────
+
+def build_qa_from_eval_dataset(corpus_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    src.evaluation.single_dataset + multi_dataset 수동 평가셋을
+    AutoRAG qa.parquet 형식으로 변환한다.
+
+    매핑 전략:
+      - expected_orgs → corpus 발주기관 부분 매칭 → retrieval_gt (chunk_0000 + chunk_0001)
+      - reference_answer → generation_gt
+      - qid 접두사: "eval_" (CSV 자동 생성 QA와 충돌 방지)
+
+    매핑 불가(corpus에 없는 기관) 질문은 자동 스킵.
+    """
+    try:
+        from src.evaluation.single_dataset import EVALUATION_QUESTIONS as sq
+        from src.evaluation.multi_dataset import EVALUATION_QUESTIONS as mq
+        # id 충돌 방지: single_ / multi_ 접두사 구분
+        questions = [
+            {**q, "_prefix": "single"} for q in sq
+        ] + [
+            {**q, "_prefix": "multi"} for q in mq
+        ]
+    except ImportError:
+        print("  [경고] src.evaluation 모듈 없음 → 수동 평가셋 스킵")
+        return pd.DataFrame()
+
+    # corpus 발주기관 컬럼 준비
+    def _get_org(meta: object) -> str:
+        if isinstance(meta, dict):
+            return str(meta.get("발주기관", "")).strip()
+        return ""
+
+    corp = corpus_df.copy()
+    corp["_org"] = corp["metadata"].apply(_get_org)
+    corpus_ids = set(corp["doc_id"])
+
+    rows: list[dict] = []
+    skipped = 0
+
+    for q in questions:
+        orgs = q.get("expected_orgs", [])
+        reference = q.get("reference_answer", "")
+        if not orgs or not reference:
+            skipped += 1
+            continue
+
+        # 각 기관에 대해 corpus에서 매칭 doc_id 수집
+        matched_ids: list[str] = []
+        for org in orgs:
+            org_lower = org.strip().lower()
+            mask = corp["_org"].apply(
+                lambda x: org_lower in x.lower() or x.lower() in org_lower
+            )
+            for _, row in corp[mask & corp["doc_id"].str.endswith("::chunk_0000")].iterrows():
+                matched_ids.append(row["doc_id"])
+                detail_id = row["doc_id"].replace("::chunk_0000", "::chunk_0001")
+                if detail_id in corpus_ids:
+                    matched_ids.append(detail_id)
+
+        if not matched_ids:
+            skipped += 1
+            continue
+
+        prefix = q.get("_prefix", "single")
+        rows.append({
+            "qid": f"eval_{prefix}_{q['id']}",
+            "query": q["question"],
+            "retrieval_gt": [matched_ids],
+            "generation_gt": [reference],
+        })
+
+    df = (
+        pd.DataFrame(rows)
+        .drop_duplicates(subset=["qid"])
+        .reset_index(drop=True)
+    )
+    print(f"  수동 평가셋 변환 완료: {len(df)}개 추가, {skipped}개 스킵 (corpus 미존재 기관)")
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────
 # 메인
 # ─────────────────────────────────────────────────────────────────
 
@@ -249,6 +332,11 @@ def main() -> None:
         default=50,
         help="이보다 짧은 텍스트 행은 스킵. 기본 50.",
     )
+    parser.add_argument(
+        "--no-eval-dataset",
+        action="store_true",
+        help="수동 평가셋(single/multi_dataset) 병합 스킵 (기본: 항상 포함)",
+    )
     args = parser.parse_args()
 
     csv_path = args.csv_path
@@ -282,12 +370,28 @@ def main() -> None:
     print(f"  detail 청크(chunk_0001+): {len(detail_chunks)}개")
 
     # ── QA 생성 ──────────────────────────────────────────────────
-    print(f"\n[3/3] QA 생성")
+    print(f"\n[3/3] QA 생성 (CSV 자동 생성)")
     qa_df = build_qa(df, corpus_df)
+    print(f"  CSV 기반 QA: {len(qa_df)}행 (문서당 {len(QUESTION_TEMPLATES)}개 × {len(df)}개 문서)")
+
+    # ── 수동 평가셋 병합 ─────────────────────────────────────────
+    if not args.no_eval_dataset:
+        print(f"\n[3b/3] 수동 평가셋 병합 (single_dataset + multi_dataset)")
+        eval_df = build_qa_from_eval_dataset(corpus_df)
+        if not eval_df.empty:
+            qa_df = (
+                pd.concat([qa_df, eval_df], ignore_index=True)
+                .drop_duplicates(subset=["qid"])
+                .reset_index(drop=True)
+            )
+            print(f"  병합 후 QA 총계: {len(qa_df)}행")
+    else:
+        print("\n[3b/3] 수동 평가셋 스킵 (--no-eval-dataset)")
+
+    # ── 저장 ─────────────────────────────────────────────────────
     qa_path = output_dir / "qa.parquet"
     qa_df.to_parquet(qa_path, index=False)
-    print(f"  qa rows: {len(qa_df)} → {qa_path}")
-    print(f"  문서당 {len(QUESTION_TEMPLATES)}개 질문 × {len(df)}개 문서 = 최대 {len(df)*len(QUESTION_TEMPLATES)}개")
+    print(f"\n  qa.parquet 저장: {len(qa_df)}행 → {qa_path}")
 
     # ── 검증 출력 ────────────────────────────────────────────────
     print("\n=== 샘플 QA 확인 ===")

@@ -129,14 +129,6 @@ node_lines:
             kv_cache_dtype: auto
             trust_remote_code: true
 
-          # ── 한국어 특화 nano (4.0G) ──────────────────────────────────
-          - module_type: vllm
-            llm: kakaocorp/kanana-nano-2.1b
-            max_tokens: 512
-            temperature: 0.1
-            gpu_memory_utilization: 0.80
-            kv_cache_dtype: auto
-
           # ── 한국어 특화 1.5 (4.4G) ───────────────────────────────────
           - module_type: vllm
             llm: kakaocorp/kanana-1.5-2.1b

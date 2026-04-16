@@ -64,14 +64,12 @@ This project provides:
 
 ## 지원 문서 포맷
 
-`DocumentLoader`는 아래 4가지 포맷을 자동 감지합니다.
+현재 일반 파일 로딩 경로에서 `DocumentLoader`가 직접 처리하는 포맷은 아래 두 가지입니다.
 
 | 포맷 | 확장자 | 인코딩 자동 감지 | 특이사항 |
 |------|--------|----------------|---------|
 | HWP | `.hwp` | 바이너리 파싱 | OLE 구조 직접 파싱 |
 | PDF | `.pdf` | — | pdfplumber 사용 |
-| 텍스트 | `.txt` | UTF-8 → CP949 → EUC-KR 순 시도 | 일반 텍스트 |
-| CSV | `.csv` | UTF-8 → CP949 → EUC-KR 순 시도 | 아래 CSV 옵션 참고 |
 
 > `data_list.csv`(메타데이터 파일)는 자동으로 인덱싱에서 제외됩니다.
 
@@ -79,8 +77,8 @@ This project provides:
 
 | 옵션 | 설명 | 사용 상황 |
 |------|------|----------|
-| 기본 (전체 문서) | CSV 전체를 하나의 문서로 처리 | RFP 내용이 여러 행에 걸쳐 정리된 경우 |
-| `--csv-row-per-doc` | CSV 각 행을 개별 문서로 처리 | 행 하나가 RFP 한 건인 경우 |
+| 기본 | 일반 파일 로딩 경로 사용 | PDF/HWP 인덱싱 |
+| `--csv-row-per-doc` | 메타데이터 CSV 각 행을 개별 문서로 처리 | 행 하나가 RFP 한 건인 경우 |
 | `--csv-text-columns` | 본문으로 사용할 컬럼 직접 지정 | 특정 컬럼만 검색 대상으로 쓸 때 |
 
 ---
@@ -165,32 +163,20 @@ python scripts/index_documents.py \
 
 ## AutoRAG 활성화
 
-AutoRAG는 현재 환경(`sprint_env`)에 설치돼 있어 별도 환경 전환 없이 바로 실행 가능합니다.
+AutoRAG는 메인 스택과 의존성 충돌 가능성이 있어 `requirements-autorag.txt` 기반 환경을 권장합니다.
 
 ### Step 1. 데이터 준비
 
 ```bash
-# 권장 설정 (RFP 섹션 인식 semantic 청킹)
-python scripts/prepare_autorag_data.py \
-  --documents-dir data \
-  --metadata-csv data/data_list.csv \
-  --output-dir data/autorag \
-  --chunk-method semantic \
+# 권장 설정 (CSV 기반 ground truth)
+python scripts/prepare_autorag_from_csv.py \
+  --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \
+  --output-dir data/autorag_csv \
   --chunk-size 600 \
-  --chunk-overlap 150
+  --chunk-overlap 100
 ```
 
-CSV 파일이 포함된 경우 옵션 추가:
-
-```bash
-python scripts/prepare_autorag_data.py \
-  --documents-dir data \
-  --output-dir data/autorag \
-  --csv-text-columns "사업명,요구사항" \
-  --csv-row-per-doc
-```
-
-산출물: `data/autorag/corpus.parquet`, `data/autorag/qa.parquet`
+산출물: `data/autorag_csv/corpus.parquet`, `data/autorag_csv/qa.parquet`
 
 ### Step 2. 최적화 실행
 
@@ -212,26 +198,14 @@ python scripts/run_autorag_optimization.py \
   --project-dir evaluation/autorag_benchmark
 ```
 
-**Scenario A — GPU 서버 (3단계 실행)**
+**Scenario A — GPU 서버**
 ```bash
-# 사전 준비 — 최초 1회
-python scripts/download_models.py   # Gemma4-E4B + 임베딩 3종
+# 통합 파이프라인 권장
+python scripts/run_pipeline.py --steps data,autorag
 
-# Step 1 — 메인 (EXAONE / kanana / Midm / Gemma3, 임베딩 5종)
-nvidia-smi  # GPU 점유 확인
-PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
-  --qa-path data/autorag/qa.parquet \
-  --corpus-path data/autorag/corpus.parquet \
-  --config-path configs/autorag/local.yaml \
-  --project-dir evaluation/autorag_benchmark_local
-
-# Step 2 — Gemma4-E4B 별도 실행
-bash scripts/run_gemma4_optimization.sh
-
-# Step 3 — 결과 병합
-python scripts/merge_gemma4_results.py \
-  --main-dir evaluation/autorag_benchmark_local \
-  --gemma4-dir evaluation/autorag_benchmark_gemma4
+# 필요 시 파인튜닝 포함
+python scripts/run_pipeline.py --steps finetune,autorag \
+  --finetune-models kanana-1.5
 ```
 
 **Scenario A-PC — 로컬 PC (8GB GPU)**
@@ -253,10 +227,10 @@ python scripts/run_autorag_optimization.py \
 
 ```bash
 # 요약 CSV
-cat evaluation/autorag_benchmark_local/0/summary.csv
+cat evaluation/autorag_benchmark_csv/0/summary.csv
 
 # 대시보드
-autorag dashboard --trial_dir evaluation/autorag_benchmark_local/0
+autorag dashboard --trial_dir evaluation/autorag_benchmark_csv/0
 
 # 최적 config 추출
 autorag extract_best_config \
@@ -281,27 +255,27 @@ pip install peft trl bitsandbytes accelerate datasets
 
 # GPU 서버 — LoRA
 python scripts/finetune_local.py \
-  --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-  --output-dir models/finetuned/kanana-nano-rag \
-  --epochs 3 --lora-r 16
+  --model-path /srv/shared_data/models/kanana/kanana-1.5-2.1b \
+  --output-dir models/finetuned/kanana-1.5 \
+  --epochs 5 --lora-r 16
 
-# 로컬 PC (8GB GPU) — QLoRA (4-bit 양자화)
+# QLoRA (4B 이상, 레지스트리 qlora=True 시 자동 적용)
 python scripts/finetune_local.py \
-  --model-path kakaocorp/kanana-nano-2.1b \
-  --output-dir models/finetuned/kanana-nano-rag \
-  --qlora --epochs 3
+  --model-path /srv/shared_data/models/gemma/Gemma3-4B \
+  --output-dir models/finetuned/gemma3 \
+  --qlora --epochs 5
 
 # EXAONE (trust_remote_code 필요)
 python scripts/finetune_local.py \
   --model-path /srv/shared_data/models/exaone/EXAONE-4.0-1.2B \
-  --output-dir models/finetuned/exaone-rag \
-  --trust-remote-code --epochs 3
+  --output-dir models/finetuned/exaone \
+  --trust-remote-code --epochs 5
 ```
 
 파인튜닝 완료 후 vLLM 서빙:
 ```bash
 python -m vllm.entrypoints.openai.api_server \
-  --model models/finetuned/kanana-nano-rag/final \
+  --model models/finetuned/kanana-1.5/final \
   --port 8001
 ```
 
@@ -355,10 +329,8 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 | EXAONE-4.0-1.2B | `exaone/EXAONE-4.0-1.2B` | 2.4G | ✅ |
 | EXAONE-Deep-2.4B | `exaone/EXAONE-Deep-2.4B` | 4.5G | ✅ |
 | EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ |
-| EXAONE-3.5-7.8B | `exaone/EXAONE-3.5-7.8B` | 30G | ✅ |
 | Gemma3-4B | `gemma/Gemma3-4B` | 8.1G | ✅ |
 | Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ✅ |
-| kanana-nano-2.1b | `kanana/kanana-nano-2.1b` | 4.0G | ✅ |
 | kanana-1.5-2.1b | `kanana/kanana-1.5-2.1b` | 4.4G | ✅ |
 | Midm-2.0-Mini | `midm/Midm-2.0-Mini` | 4.4G | ✅ |
 
@@ -368,23 +340,21 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 | 모델명 | 크기 | gpu_memory_utilization | kv_cache_dtype |
 |--------|------|----------------------|----------------|
 | EXAONE-4.0-1.2B | 2.4G | 0.70 | auto |
-| kanana-nano-2.1b | 4.0G | 0.70 | auto |
 | kanana-1.5-2.1b | 4.4G | 0.70 | auto |
 | Midm-2.0-Mini | 4.4G | 0.70 | auto |
-| Gemma3-4B | 8.1G | 0.70 | auto (max_model_len: 8192) |
+| Gemma3-4B | 8.1G | 0.70 | auto (max_model_len: 16384) |
 
 ### AutoRAG 평가 모델 (서버, `local_gemma4.yaml` 기준 — 별도 실행)
 
 | 모델명 | 크기 | gpu_memory_utilization | 특이사항 |
 |--------|------|----------------------|---------|
-| Gemma4-E4B | 15G | 0.85 | BF16, dense, max_model_len: 8192 |
+| Gemma4-E4B | 15G | 0.85 | BF16, dense, max_model_len: 16384 |
 
 ### AutoRAG 평가 모델 (로컬 PC)
 
 | HF Hub ID | 크기 | gpu_memory_utilization | kv_cache_dtype |
 |-----------|------|----------------------|----------------|
 | LGAI-EXAONE/EXAONE-4.0-1.2B | 2.4G | 0.80 | auto |
-| kakaocorp/kanana-nano-2.1b | 4.0G | 0.80 | auto |
 | kakaocorp/kanana-1.5-2.1b | 4.4G | 0.80 | auto |
 | skt/Midm-2.0-Mini-Instruct | 4.4G | 0.80 | auto |
 
@@ -394,13 +364,13 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 
 ## 컬렉션 관리 (A/B안 분리 운영)
 
-| 컬렉션명 | 시나리오 | 임베딩 | chunk_size |
-|---------|---------|--------|-----------|
-| `rfp_chunk1200` | B (OpenAI) | text-embedding-3-small (512) | 1200 |
-| `rfp_chunk800` | B (OpenAI) | text-embedding-3-small (512) | 800 |
-| `rfp_chunk1200_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 1200 |
-| `rfp_chunk800_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 800 |
-| `rfp_chunk1200_a_sroberta` | A (ko-sroberta) | ko-sroberta-multitask (768) | 1200 |
+| 컬렉션명 | 시나리오 | 임베딩 | chunk_size | 비고 |
+|---------|---------|--------|-----------|------|
+| `rfp_chunk600` | B (OpenAI) | text-embedding-3-small (512) | 600 | **기본값** — CSV 정제 데이터, 664청크 |
+| `rfp_chunk1200` | B (OpenAI) | text-embedding-3-small (512) | 1200 | HWP 원문 추출 |
+| `rfp_chunk1200_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 1200 | |
+| `rfp_chunk800_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 800 | |
+| `rfp_chunk1200_a_sroberta` | A (ko-sroberta) | ko-sroberta-multitask (768) | 1200 | |
 
 ---
 

@@ -7,7 +7,7 @@
 ## 엔트리포인트
 - `app.py`: 메인 Streamlit 앱. 세션 단위 파이프라인/대화 메모리 유지.
   - 사이드바 **실행 모드** 라디오로 A/B 전환. 시나리오에 따라 컬렉션 목록 자동 전환.
-  - B안: `rfp_chunk1200`, `rfp_chunk800`, `rfp_documents`
+  - B안: `rfp_chunk600`, `rfp_chunk1200`
   - A안: `rfp_chunk1200_a`, `rfp_chunk800_a`, `rfp_chunk1200_a_sroberta`
 - `scripts/index_documents.py`: 문서 로딩, 청킹, 임베딩, 벡터스토어 적재.
 - `scripts/run_evaluation.py`: `core`/`detailed` 평가 실행 및 리포트 저장.
@@ -47,25 +47,23 @@
 ---
 
 ### `src/document_loader.py`
-PDF / HWP / TXT / CSV 파일 로딩 + `data_list.csv` 메타데이터 병합.
+PDF / HWP 파일 로딩 + `data_list.csv` 메타데이터 병합.
 
-**지원 포맷** (`DocumentLoader.SUPPORTED_EXTS`):
+현재 구현 기준 일반 파일 로딩 지원 포맷:
 
 | 포맷 | 처리 방식 |
 |------|----------|
 | `.hwp` | OLE 바이너리 직접 파싱 (olefile), 서로게이트 문자 자동 제거 |
 | `.pdf` | pdfplumber 페이지별 텍스트 추출 |
-| `.txt` | UTF-8 → UTF-8-sig → CP949 → EUC-KR 순으로 인코딩 자동 감지 |
-| `.csv` | 동일한 인코딩 자동 감지. 아래 두 가지 모드 지원 |
 
 **CSV 처리 모드**:
-- `csv_row_per_doc=False` (기본값): CSV 전체 → 하나의 문서
-- `csv_row_per_doc=True`: CSV 각 행 → 개별 문서 (행 하나가 RFP 한 건인 경우)
+- `csv_row_per_doc=False` (기본값): 일반 파일 로딩 경로 사용
+- `csv_row_per_doc=True`: 메타데이터 CSV 각 행 → 개별 문서 (행 하나가 RFP 한 건인 경우)
 - `csv_text_columns`: 본문으로 쓸 컬럼 직접 지정. `None`이면 숫자 전용 컬럼 제외 후 자동 감지
 
 `data_list.csv`(메타데이터 파일)는 인덱싱 대상에서 자동 제외됩니다.
 
-`load_single()` 반환 타입: `list[dict]` — CSV `row_per_doc` 시 여러 개, 나머지는 1개짜리 리스트.
+`load_single()` 반환 타입: `dict` — 단일 PDF/HWP 문서 로딩 결과.
 
 ---
 
@@ -137,7 +135,7 @@ AutoRAG 최적화 실행 + 세 가지 내장 패치:
 | `_patch_chroma_is_exist()` | `Chroma.is_exist` | SQLite 변수 제한(999) 초과 오류 |
 | `_patch_run_evaluator()` | `BaseModule.run_evaluator` | 모델별 VRAM 순차 해제 |
 
-> 세 패치 모두 `tutorial.yaml`, `local.yaml`, `local_pc.yaml` 실행 시 자동 적용됩니다.
+> 패치는 `run_autorag_optimization.py`를 통해 실행되는 모든 config에 자동 적용됩니다.
 
 ---
 
@@ -153,10 +151,10 @@ AutoRAG 최적화 실행 + 세 가지 내장 패치:
 `local.yaml` 특이 설정:
 - `gpu_memory_utilization: 0.70` (22GB GPU)
 - `kv_cache_dtype: auto` → 모델 dtype(bfloat16) 자동 사용
-- `max_model_len: 8192` — Gemma3-4B에만 적용 (131072 기본값 → KV 캐시 초과 방지)
+- `max_model_len: 16384` — Gemma3-4B에 적용 (131072 기본값 대비 축소, KV 캐시 초과 방지)
 
 `local_gemma4.yaml` 특이 설정:
-- `gpu_memory_utilization: 0.85`, `max_model_len: 8192`
+- `gpu_memory_utilization: 0.85`, `max_model_len: 16384`
 - user-local transformers 5.x + vLLM 필요 → `bash scripts/run_gemma4_optimization.sh`
 
 `local_pc.yaml` 특이 설정:
@@ -171,10 +169,8 @@ AutoRAG 최적화 실행 + 세 가지 내장 패치:
 | `exaone/` | EXAONE-4.0-1.2B | 2.4G | ✅ |
 | `exaone/` | EXAONE-Deep-2.4B | 4.5G | ✅ |
 | `exaone/` | EXAONE-Deep-7.8B | 15G | ✅ |
-| `exaone/` | EXAONE-3.5-7.8B | 30G | ✅ |
 | `gemma/` | Gemma3-4B | 8.1G | ✅ |
 | `gemma/` | Gemma4-E4B | 15G | ✅ |
-| `kanana/` | kanana-nano-2.1b | 4.0G | ✅ |
 | `kanana/` | kanana-1.5-2.1b | 4.4G | ✅ |
 | `midm/` | Midm-2.0-Mini | 4.4G | ✅ |
 | `embeddings/` | BGE-m3-ko | 2.2G | — |
@@ -192,6 +188,8 @@ AutoRAG 최적화 실행 + 세 가지 내장 패치:
 - `--qlora`: 4-bit NF4 양자화 (bitsandbytes). 8GB GPU에서도 학습 가능.
 - `target_modules`: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`
 - 완료 후 `models/finetuned/{name}/final/` 저장 → vLLM으로 바로 서빙 가능
+- 저장 방식: GPU 해제 후 **스트리밍 mmap 머지** (`_stream_merge_and_save`) — LoRA 어댑터를 텐서 단위로 적용, 512MB 샤드 분할 저장 (RAM 최소화)
+- EarlyStopping 내장: `eval_loss` 기준 patience=3 (기본값), `--early-stop-patience` 옵션으로 조정
 
 ### `scripts/finetune_openai.py`
 OpenAI Fine-tuning API 래퍼.
@@ -220,6 +218,7 @@ OpenAI Fine-tuning API 래퍼.
 | `--use-batch-api` | `False` | OpenAI Batch API 사용 (Scenario B 전용) |
 | `--csv-text-columns` | `None` | CSV 본문 컬럼 지정 (쉼표 구분) |
 | `--csv-row-per-doc` | `False` | CSV 각 행을 개별 문서로 처리 |
+| `--from-parquet` | `None` | corpus.parquet 직접 임베딩 (청킹 생략, rfp_chunk600 생성에 사용) |
 
 ### `scripts/prepare_autorag_data.py`
 
@@ -252,7 +251,8 @@ OpenAI Fine-tuning API 래퍼.
 | `--output-dir` | (필수) | 결과 저장 디렉토리 |
 | `--qlora` | False | 4-bit QLoRA 활성화 (8GB GPU용) |
 | `--trust-remote-code` | False | EXAONE 등 커스텀 코드 모델 |
-| `--epochs` | 3 | 학습 epoch |
+| `--epochs` | 5 | 학습 epoch |
+| `--early-stop-patience` | 3 | EarlyStopping patience (eval_loss 기준) |
 | `--batch-size` | 2 | 배치 크기 |
 | `--grad-accum` | 8 | Gradient accumulation (실효 배치 = 2×8=16) |
 | `--lora-r` | 16 | LoRA rank |
@@ -279,7 +279,7 @@ OpenAI Fine-tuning API 래퍼.
 - 생성 프롬프트 변경: `src/generator.py` + `detailed` 평가로 품질 확인
 - 메타데이터 필터 변경: `src/retriever.py`, `src/rag_pipeline.py` 동시 점검
 - 평가 지표 추가: `src/evaluation/*` 모듈 추가 후 `summary_report`와 CLI 출력 반영
-- 새 문서 포맷 추가: `src/document_loader.py`의 `load_single()` + `SUPPORTED_EXTS` 확장
+- 새 문서 포맷 추가: `src/document_loader.py`의 `load_single()` 및 `load_all()`의 확장자 분기 확장
 - AutoRAG 새 모델 추가: `configs/autorag/local.yaml` 또는 `local_pc.yaml`의 `generator.modules`에 vllm 블록 추가
 - AutoRAG Gemma4 모델 변경: `configs/autorag/local_gemma4.yaml` 수정 후 `bash scripts/run_gemma4_optimization.sh`
 - AutoRAG 새 임베딩 추가: `configs/autorag/local.yaml`과 `local_gemma4.yaml` 양쪽의 `vectordb` + `semantic_retrieval.modules`에 추가, `scripts/download_models.py`에 다운로드 항목 추가

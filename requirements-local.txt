@@ -13,6 +13,8 @@ openai>=2.30.0
 python-dotenv>=1.0.0
 
 # ── LangChain ─────────────────────────────────────────────────
+langchain>=1.2.0
+langchain-community>=0.4.0
 langchain-text-splitters>=1.1.1
 
 # ── Document Parsing ──────────────────────────────────────────
@@ -22,24 +24,26 @@ olefile>=0.47
 python-docx>=1.0.0
 
 # ── Embedding & Vector DB ─────────────────────────────────────
-chromadb>=0.5.0
+chromadb>=1.5.0
 faiss-cpu>=1.8.0
 
 # ── HuggingFace (시나리오 A) ───────────────────────────────────
-transformers>=4.45.0
-sentence-transformers>=3.0.0
+transformers>=5.0.0
+sentence-transformers>=5.0.0
+huggingface_hub>=1.9.0
 torch>=2.2.0
-accelerate>=0.20.1
+accelerate>=1.0.0
 
 # ── Data Processing ───────────────────────────────────────────
 pandas>=2.2.0
-numpy>=1.26.0
+numpy>=2.0.0
 pyarrow>=16.0.0
 
 # ── Evaluation (Windows 호환 버전) ────────────────────────────
 rouge-score>=0.1.2
 nltk>=3.9.0
 bert-score>=0.3.13
+evaluate>=0.4.0
 # ragas, FlagEmbedding → Windows 제외 (C++ 빌드 필요)
 
 # ── Streamlit App ─────────────────────────────────────────────

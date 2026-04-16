@@ -3,7 +3,6 @@
 #
 # 사용 모델 (vLLM으로 직접 로드):
 #   /srv/shared_data/models/exaone/EXAONE-4.0-1.2B   (2.4G, 빠름)
-#   /srv/shared_data/models/kanana/kanana-nano-2.1b   (4.0G, 한국어 특화)
 #   /srv/shared_data/models/kanana/kanana-1.5-2.1b    (4.4G, 한국어 특화)
 #   /srv/shared_data/models/midm/Midm-2.0-Mini        (4.4G, 한국어 특화)
 #   /srv/shared_data/models/gemma/Gemma3-4B           (8.1G, 순차 로드)
@@ -197,17 +196,6 @@ node_lines:
             gpu_memory_utilization: 0.70
             kv_cache_dtype: auto
             trust_remote_code: true
-
-          # ── kanana-nano-2.1b (4.0G) ──────────────────────────────────
-          # temperature: 0.1~0.3 (Kakao 공식 greedy 기준, 상향 비교)
-          # top_p: 0.80~0.95 — 그리드 서치
-          - module_type: vllm
-            llm: /srv/shared_data/models/kanana/kanana-nano-2.1b
-            max_tokens: 2048
-            temperature: [0.1, 0.2, 0.3]
-            top_p: [0.80, 0.90, 0.95]
-            gpu_memory_utilization: 0.70
-            kv_cache_dtype: auto
 
           # ── kanana-1.5-2.1b (4.4G) ───────────────────────────────────
           # temperature: 0.1~0.3 (Kakao 공식 greedy 기준, 상향 비교)
