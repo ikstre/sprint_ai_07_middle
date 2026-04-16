@@ -1,8 +1,8 @@
 # ============================================================
 # 전체 의존성
 #
-# 권장 환경: Python 3.11 (conda env AI_07_MIDDLE)
-#   conda activate AI_07_MIDDLE
+# 권장 환경: Python 3.11 (conda env sprint_env)
+#   conda activate sprint_env
 #   pip install -r requirements.txt
 #
 # Python 3.14 Windows 환경에서는 requirements-local.txt 사용:
@@ -14,6 +14,8 @@ openai>=2.30.0
 python-dotenv>=1.0.0
 
 # ── LangChain ─────────────────────────────────────────────────
+langchain>=1.2.0
+langchain-community>=0.4.0
 langchain-text-splitters>=1.1.1
 
 # ── Document Parsing ──────────────────────────────────────────
@@ -23,14 +25,17 @@ olefile>=0.47
 python-docx>=1.0.0
 
 # ── Embedding & Vector DB ─────────────────────────────────────
-chromadb>=0.5.0
+chromadb>=1.5.0
 faiss-cpu>=1.8.0
 
 # ── HuggingFace (시나리오 A) ───────────────────────────────────
-transformers>=4.45.0
-sentence-transformers>=3.0.0
-torch>=2.2.0
-accelerate>=0.20.1
+transformers>=5.0.0
+sentence-transformers>=5.0.0
+huggingface_hub>=1.9.0
+torch>=2.10.0
+accelerate>=1.0.0
+peft>=0.18.0
+trl>=1.1.0
 # 4-bit 양자화 (hf_load_in_4bit=True 사용 시, CUDA Linux 환경만 지원)
 bitsandbytes>=0.43.0; sys_platform == "linux"
 
@@ -40,13 +45,14 @@ FlagEmbedding>=1.2.0; python_version < "3.14"
 
 # ── Data Processing ───────────────────────────────────────────
 pandas>=2.2.0
-numpy>=1.26.0
+numpy>=2.0.0
 pyarrow>=16.0.0
 
 # ── Evaluation ────────────────────────────────────────────────
 rouge-score>=0.1.2
 nltk>=3.9.0
 bert-score>=0.3.13
+evaluate>=0.4.0
 
 # Python 3.14에서는 scikit-network C++ 빌드 실패 → 제외
 ragas>=0.4.3; python_version < "3.14"

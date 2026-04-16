@@ -10,22 +10,16 @@ instruction-following 모델을 학습합니다.
 실행 예시:
     # LoRA (GPU 메모리 충분할 때)
     python scripts/finetune_local.py \
-        --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-        --output-dir models/finetuned/kanana-nano-rag \
-        --epochs 3
+        --model-path /srv/shared_data/models/kanana/kanana-1.5-2.1b \
+        --output-dir models/finetuned/kanana-1.5 \
+        --epochs 5
 
-    # QLoRA (8GB GPU 등 메모리 제한 환경)
+    # QLoRA (VRAM 제한 환경, 4B+ 모델)
     python scripts/finetune_local.py \
-        --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-        --output-dir models/finetuned/kanana-nano-rag \
+        --model-path /srv/shared_data/models/gemma/Gemma3-4B \
+        --output-dir models/finetuned/gemma3 \
         --qlora \
-        --epochs 3
-
-    # HuggingFace Hub 모델 (로컬 PC)
-    python scripts/finetune_local.py \
-        --model-path kakaocorp/kanana-nano-2.1b \
-        --output-dir models/finetuned/kanana-nano-rag \
-        --qlora
+        --epochs 5
 """
 
 from __future__ import annotations
@@ -364,22 +358,32 @@ def train(args: argparse.Namespace) -> None:
     print("\n학습 시작...")
     trainer.train()
 
-    # ── 저장 (2단계: 어댑터 백업 → GPU 해제 → 기반 모델 재로드 → merge) ──
-    # QLoRA 학습 중 모델은 4-bit 상태. merge_and_unload()는 BF16 전체 가중치로
-    # 변환해야 해서 메모리가 2~3배 필요 → 학습 중 상태에서 바로 merge하면 OOM.
-    # 해결: 어댑터만 먼저 저장 → GPU 메모리 해제 → 기반 모델 BF16 재로드 → merge.
+    # ── 저장: 어댑터 → final/ 저장 → 스트리밍 merge ──────────────────────
+    # QLoRA/LoRA 학습 후 merge 전략:
+    #   스트리밍 merge: 기반 모델을 mmap으로 읽고 LoRA 델타를 CPU에서 계산.
+    #   GPU/RAM 상관없이 동작하며, 15B+ 대형 모델도 OOM 없이 처리.
+    #   폴백: transformers 기반 GPU reload merge (소형 모델 또는 sharded 미지원 시).
 
     import gc
-    from peft import PeftModel
+    import sys as _sys
 
-    # Step 1: 어댑터 저장 (merge 실패해도 repair 가능하도록)
-    adapter_dir = output_dir / "adapter"
-    print(f"\n[1/3] LoRA 어댑터 저장 중: {adapter_dir}")
-    trainer.model.save_pretrained(str(adapter_dir))
-    tokenizer.save_pretrained(str(adapter_dir))
+    _scripts_dir = str(Path(__file__).parent.parent)
+    if _scripts_dir not in _sys.path:
+        _sys.path.insert(0, _scripts_dir)
+    from scripts.repair_finetuned_models import (  # type: ignore
+        _stream_merge_and_save, _remove_adapter_artifacts, _save_sharded,
+    )
 
-    # Step 2: 학습에 사용한 모델/트레이너 해제 → GPU 메모리 확보
-    print("\n[2/3] GPU 메모리 해제 중...")
+    final_dir = output_dir / "final"
+    final_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: 어댑터를 final/ 에 저장 (merge 실패해도 repair_finetuned_models.py로 복구 가능)
+    print(f"\n[1/2] LoRA 어댑터 저장 중: {final_dir}")
+    trainer.model.save_pretrained(str(final_dir))
+    tokenizer.save_pretrained(str(final_dir))
+
+    # Step 2: 학습 모델/트레이너 해제 후 스트리밍 merge
+    print("\n[2/2] GPU 메모리 해제 후 스트리밍 merge 중...")
     _train_model = trainer.model
     del trainer, _train_model
     gc.collect()
@@ -387,42 +391,55 @@ def train(args: argparse.Namespace) -> None:
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
-    # Step 3: 기반 모델 BF16으로 재로드 → 어댑터 로드 → merge
-    print(f"\n[3/3] 기반 모델 재로드 후 LoRA merge 중...")
-    print(f"  기반 모델: {args.model_path}")
-    _dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    _base = AutoModelForCausalLM.from_pretrained(
-        args.model_path,
-        torch_dtype=_dtype,
-        device_map="auto",
-        trust_remote_code=args.trust_remote_code,
-    )
-    _peft = PeftModel.from_pretrained(_base, str(adapter_dir))
-    merged = _peft.merge_and_unload()
+    # 기존 model 샤드 삭제 (재학습 시 구버전 파일이 남아 디스크를 2배 소비하는 것 방지)
+    for _old_shard in final_dir.glob("model-*.safetensors"):
+        _old_shard.unlink()
+    _old_index = final_dir / "model.safetensors.index.json"
+    if _old_index.exists():
+        _old_index.unlink()
+    _old_single = final_dir / "model.safetensors"
+    if _old_single.exists():
+        _old_single.unlink()
 
-    if hasattr(merged, "config") and hasattr(merged.config, "quantization_config"):
-        merged.config.quantization_config = None
+    stream_result = _stream_merge_and_save(final_dir, args.model_path)
 
-    final_dir = output_dir / "final"
-    merged.save_pretrained(str(final_dir))
-
-    # QLoRA: save_pretrained()가 model.safetensors를 생성하지 않는 경우 직접 저장
-    if not list(final_dir.glob("model*.safetensors")):
-        print("  [경고] model.safetensors 없음 → PreTrainedModel 직접 저장...")
-        from transformers import PreTrainedModel as _PTM
-        _actual = (merged.base_model.model
-                   if hasattr(merged, "base_model") and hasattr(merged.base_model, "model")
-                   else merged)
-        if hasattr(_actual, "config") and hasattr(_actual.config, "quantization_config"):
-            _actual.config.quantization_config = None
-        _PTM.save_pretrained(_actual, str(final_dir))
-
-    tokenizer.save_pretrained(str(final_dir))
+    if stream_result is None:
+        # 폴백: GPU 재로드 merge (스트리밍 미지원 모델 구조)
+        print(f"  [폴백] GPU 재로드 merge 시도...")
+        from peft import PeftModel
+        _dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        _base = AutoModelForCausalLM.from_pretrained(
+            args.model_path,
+            torch_dtype=_dtype,
+            device_map={"": "cuda:0"} if torch.cuda.is_available() else "cpu",
+            low_cpu_mem_usage=True,
+            trust_remote_code=args.trust_remote_code,
+        )
+        _peft = PeftModel.from_pretrained(_base, str(final_dir))
+        merged = _peft.merge_and_unload()
+        if hasattr(merged, "config") and hasattr(merged.config, "quantization_config"):
+            merged.config.quantization_config = None
+        _save_sharded(merged, final_dir)
+        tokenizer.save_pretrained(str(final_dir))
+        del merged, _peft, _base
+        gc.collect()
+        torch.cuda.empty_cache()
+    elif stream_result is False:
+        print(f"  [경고] merge 실패 — 어댑터만 저장된 상태. repair_finetuned_models.py로 나중에 복구 가능.")
 
     # 저장 후처리: quantization_config 잔류 / adapter 파일 제거
-    # (일부 PEFT 버전에서 merge 후에도 두 아티팩트가 잔류해 vLLM 로드 실패)
     print("\n저장 후처리 (vLLM 호환성 보장)...")
     _cleanup_merged_model(final_dir)
+
+    # Step 3: 체크포인트 삭제 (디스크 절약)
+    _ckpt_deleted = 0
+    for _ckpt in output_dir.glob("checkpoint-*"):
+        if _ckpt.is_dir():
+            import shutil
+            shutil.rmtree(_ckpt)
+            _ckpt_deleted += 1
+    if _ckpt_deleted:
+        print(f"\n체크포인트 {_ckpt_deleted}개 삭제 완료 (디스크 절약)")
 
     print(f"\n학습 완료. 저장 경로: {final_dir}")
     print("\nvLLM 서빙 방법:")

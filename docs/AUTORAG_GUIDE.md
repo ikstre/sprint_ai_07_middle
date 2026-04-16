@@ -8,11 +8,11 @@
 - 권장 파이썬 버전: `3.11` 또는 `3.12`
 - 설치:
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-autorag.txt
 ```
 
 참고:
-- `requirements.txt` 내부 마커로 Python `<3.13`에서만 AutoRAG가 설치됩니다.
+- AutoRAG는 메인 서비스 스택과 의존성 충돌 가능성이 있어 별도 환경을 권장합니다.
 
 ## 1) 데이터 준비
 
@@ -144,7 +144,6 @@ Scenario A 생성 모델 (`configs/autorag/local.yaml` + `local_gemma4.yaml`):
 | 모델 | 크기 | gpu_memory_utilization | 특이사항 |
 |------|------|------------------------|---------|
 | EXAONE-4.0-1.2B | 2.4G | 0.70 | trust_remote_code 필요 |
-| kanana-nano-2.1b | 4.0G | 0.70 | llama 계열, 한국어 특화 |
 | kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Gemma3-4B | 8.1G | 0.70 | max_model_len: 16384 |
@@ -193,32 +192,27 @@ python scripts/run_autorag_optimization.py \
 ```bash
 # 전체: 데이터 + 파인튜닝(2종) + AutoRAG
 python scripts/run_pipeline.py --steps all \
-  --finetune-models kanana-nano,exaone
+  --finetune-models kanana-1.5,exaone
 
 # 데이터 + AutoRAG (파인튜닝 생략)
 python scripts/run_pipeline.py --steps data,autorag
 
 # 파인튜닝 + AutoRAG (데이터 이미 준비됨)
 python scripts/run_pipeline.py --steps finetune,autorag \
-  --finetune-models kanana-nano \
-  --finetune-epochs 3
+  --finetune-models kanana-1.5 \
+  --finetune-epochs 5
 
 # AutoRAG만 재실행
 python scripts/run_pipeline.py --steps autorag
 
 # 재학습 강제 (기존 결과 덮어쓰기)
 python scripts/run_pipeline.py --steps finetune,autorag \
-  --finetune-models kanana-nano \
+  --finetune-models kanana-1.5 \
   --force-finetune
 
-# 7.8B 모델 — QLoRA 필수 (22GB GPU 메모리 한도)
+# 7.8B 모델 — QLoRA 자동 적용
 python scripts/run_pipeline.py --steps finetune,autorag \
-  --finetune-models exaone-3.5-7.8b \
-  --qlora
-
-# Gemma4-26B — 학습 불가, AutoRAG 평가만 자동 처리
-python scripts/run_pipeline.py --steps autorag \
-  --finetune-models gemma4-26b
+  --finetune-models exaone-deep-7.8b
 ```
 
 ### 주요 옵션
@@ -227,7 +221,7 @@ python scripts/run_pipeline.py --steps autorag \
 |------|--------|------|
 | `--steps` | `all` | `data`, `finetune`, `autorag` 또는 `all` |
 | `--finetune-models` | (없음) | 쉼표 구분 모델 short name (아래 표 참조) |
-| `--finetune-epochs` | `3` | LoRA 학습 에포크 수 |
+| `--finetune-epochs` | `5` | LoRA 학습 에포크 수 |
 | `--finetune-lr` | `2e-4` | 학습률 |
 | `--max-seq-length` | `1024` | 최대 시퀀스 길이 |
 | `--qlora` | false | 4-bit QLoRA (7.8B 이상, 메모리 제한 환경) |
@@ -240,16 +234,13 @@ python scripts/run_pipeline.py --steps autorag \
 
 | short name | 실제 모델 | 크기 | 비고 |
 |------------|----------|------|------|
-| `kanana-nano` | kanana-nano-2.1b | 4.0G | |
 | `kanana-1.5` | kanana-1.5-2.1b | 4.4G | |
 | `exaone` | EXAONE-4.0-1.2B | 2.4G | trust_remote_code |
 | `exaone-deep-2.4b` | EXAONE-Deep-2.4B | 4.5G | trust_remote_code |
-| `exaone-3.5-7.8b` | EXAONE-3.5-7.8B | 30G | **`--qlora` 필수** |
-| `exaone-deep-7.8b` | EXAONE-Deep-7.8B | 15G | **`--qlora` 필수** |
+| `exaone-deep-7.8b` | EXAONE-Deep-7.8B | 15G | **QLoRA 자동 적용** |
 | `midm` | Midm-2.0-Mini | 4.4G | |
-| `gemma3` | Gemma3-4B | 8.1G | |
-| `gemma4` | Gemma4-E4B | 15G | `--qlora` 권장 |
-| `gemma4-26b` | Gemma4-26B-NVFP4 | 22GB+ | **eval-only** (학습 불가, AutoRAG config만 추가) |
+| `gemma3` | Gemma3-4B | 8.1G | QLoRA 자동 적용 |
+| `gemma4` | Gemma4-E4B | 15G | QLoRA 자동 적용 |
 
 ### 파이프라인 동작 흐름
 
@@ -258,9 +249,8 @@ data 단계
   CSV → data/autorag_csv/corpus.parquet + qa.parquet
 
 finetune 단계 (모델별 순차 실행)
-  kanana-nano → models/finetuned/kanana-nano/final
+  kanana-1.5  → models/finetuned/kanana-1.5/final
   exaone      → models/finetuned/exaone/final
-  gemma4-26b  → 스킵 (eval-only)
   ...
 
 autorag 단계
@@ -269,12 +259,12 @@ autorag 단계
   │   (base config + 파인튜닝 모델 + eval-only 모델 generator 추가)
   │   → evaluation/autorag_benchmark_csv/0/
   │
-  └ Gemma4 그룹 (gemma4 / gemma4-26b — transformers 5.x 필요)
+  └ Gemma4 그룹 (gemma4 — transformers 5.x 필요)
       configs/autorag/local_csv_pipeline_gemma.yaml 자동 생성
       → evaluation/autorag_benchmark_csv_gemma/0/
 ```
 
-> **Gemma4 그룹 분리 이유**: transformers 5.x가 필요한 Gemma4 계열은 user-local 패키지를 허용해야 하므로  
+> **Gemma4 그룹 분리 이유**: transformers 5.x가 필요한 Gemma4-E4B는 user-local 패키지를 허용해야 하므로  
 > 별도 project dir(`autorag_benchmark_csv_gemma`)에서 자동으로 분리 실행됩니다.
 
 ## 4) 결과 확인
@@ -329,15 +319,15 @@ pip install peft trl bitsandbytes accelerate datasets
 
 # LoRA — CSV 데이터 기반 (기본값)
 python scripts/finetune_local.py \
-    --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-    --output-dir models/finetuned/kanana-nano \
-    --epochs 3
+    --model-path /srv/shared_data/models/kanana/kanana-1.5-2.1b \
+    --output-dir models/finetuned/kanana-1.5 \
+    --epochs 5
 
-# QLoRA (8GB GPU)
+# QLoRA (4B 이상 모델, 레지스트리 qlora=True 시 자동 적용)
 python scripts/finetune_local.py \
-    --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-    --output-dir models/finetuned/kanana-nano \
-    --qlora --epochs 3
+    --model-path /srv/shared_data/models/gemma/Gemma3-4B \
+    --output-dir models/finetuned/gemma3 \
+    --qlora --epochs 5
 ```
 
 주요 옵션:
@@ -354,7 +344,7 @@ python scripts/finetune_local.py \
 학습 후 vLLM으로 서빙:
 ```bash
 python -m vllm.entrypoints.openai.api_server \
-    --model models/finetuned/kanana-nano-rag/final \
+    --model models/finetuned/kanana-1.5/final \
     --port 8001
 ```
 

@@ -232,7 +232,13 @@ class RAGGenerator:
             return self.config.routing_simple_model
         return self.config.openai_chat_model
 
+    @staticmethod
+    def _sanitize_text(text: str) -> str:
+        """서로게이트 문자 제거 — OpenAI API JSON body 파싱 에러 방지."""
+        return text.encode("utf-8", errors="ignore").decode("utf-8")
+
     def _call_openai(self, client, user_prompt: str, stream: bool = False, query: str = "") -> tuple[str, dict | None]:
+        user_prompt = self._sanitize_text(user_prompt)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(self.memory.get_messages())
         messages.append({"role": "user", "content": user_prompt})

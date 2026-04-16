@@ -148,7 +148,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare qa.parquet/corpus.parquet for AutoRAG.")
     parser.add_argument("--documents-dir", type=str, default=None,
                         help="PDF/HWP 파일 디렉토리. --csv-row-per-doc 사용 시 불필요.")
-    parser.add_argument("--metadata-csv", type=str, default="data/data_list.csv")
+    parser.add_argument("--metadata-csv", type=str, default="/srv/shared_data/datasets/data_list_cleaned.csv")
     parser.add_argument("--output-dir", type=str, default="data/autorag")
     parser.add_argument("--chunk-method", type=str, default="semantic", choices=["naive", "semantic"])
     parser.add_argument("--chunk-size", type=int, default=800)

@@ -137,7 +137,7 @@ node_lines:
               kv_cache_dtype: auto
               trust_remote_code: true
         modules:
-          # ── 프롬프트 3종 비교 ────────────────────────────────────────
+          # ── 프롬프트 4종 비교 ────────────────────────────────────────
           # P1: Baseline — 단순 지시
           - module_type: fstring
             prompt:
@@ -163,6 +163,26 @@ node_lines:
                 참고 문서: {retrieved_contents}
                 답변:
 
+              # P4: 입찰메이트 운영 프롬프트 (src/generator.py 실제 사용 중)
+              - |
+                당신은 '입찰메이트'의 RFP 분석 AI 어시스턴트입니다.
+                항상 검색된 문서 근거를 우선으로 답변하고, 문서에 없는 내용은 추측하지 마세요.
+                핵심 요구사항/기관/예산/제출방식/일정 중심으로 간결하게 답변하세요.
+
+                아래 컨텍스트를 근거로 질문에 답변하세요.
+
+                [컨텍스트]
+                {retrieved_contents}
+
+                [질문]
+                {query}
+
+                [답변 작성 규칙]
+                - 문서 근거 기반으로만 답변
+                - 비교 질문이면 항목별 표 또는 목록
+                - 근거가 없으면 "문서에서 확인되지 않음"이라고 명시
+                답변:
+
       - node_type: generator
         strategy:
           metrics:
@@ -184,15 +204,6 @@ node_lines:
             gpu_memory_utilization: 0.70
             kv_cache_dtype: auto
             trust_remote_code: true
-
-          # ── kanana-nano-2.1b (4.0G) ──────────────────────────────────
-          - module_type: vllm
-            llm: /srv/shared_data/models/kanana/kanana-nano-2.1b
-            max_tokens: [256, 512, 1024]
-            temperature: [0.1, 0.2]
-            top_p: [0.85, 0.95]
-            gpu_memory_utilization: 0.70
-            kv_cache_dtype: auto
 
           # ── kanana-1.5-2.1b (4.4G) ───────────────────────────────────
           - module_type: vllm

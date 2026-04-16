@@ -1,11 +1,15 @@
 # sprint_ai_07_middle
 
-기업/공공 RFP 문서를 대상으로 한 RAG 시스템 프로젝트입니다.  
-본 저장소는 아래 3가지를 모두 제공합니다.
+기업/공공 RFP 문서를 대상으로 한 RAG 시스템 프로젝트입니다.
 
-1. 실서비스용 RAG 앱/파이프라인 (Scenario A/B 모두 지원)
-2. AutoRAG 기반 자동 최적화 실험 파이프라인
-3. 운영/튜닝을 분리한 평가 체계 (`core` vs `detailed`)
+현재 저장소는 아래 세 축으로 구성됩니다.
+
+1. 서비스형 RAG 앱/파이프라인
+2. AutoRAG 기반 A안 최적화/파인튜닝 파이프라인
+3. 운영용 평가 및 릴리즈 게이트
+
+이 문서는 "지금 이 저장소를 어떻게 실행하고 이해해야 하는가"를 기준으로 정리했습니다.
+세부 구현 책임은 `docs/` 문서를 참고하되, 실행 순서와 현재 상태는 이 README를 우선합니다.
 
 ---
 
@@ -13,11 +17,122 @@
 
 - 아키텍처/개발 흐름: `docs/ENGINEERING_GUIDE.md`
 - 코드 책임 분리 맵: `docs/CODEBASE_MAP.md`
+- 구조 도식: `docs/diagram.md`
+- 발표용 도식 초안: `docs/diagram_presentation.md`
 - 평가 실행/게이트 기준: `docs/EVALUATION_GUIDE.md`
 - 멀티 사용자 운영/보안 가이드: `docs/OPS_SECURITY_MULTIUSER.md`
 - AutoRAG 실험/배포 가이드: `docs/AUTORAG_GUIDE.md`
 - 노트북 실행 가이드: `docs/NOTEBOOK_GUIDE.md`
 - 보고서 템플릿: `docs/REPORT_TEMPLATE.md`
+
+## 구조 개요
+
+### A안: 로컬 모델 + AutoRAG 중심
+
+- 목적: 로컬 모델로 AutoRAG를 돌려 검색/프롬프트/생성 조건을 비교하고, 최적 조건으로 RAG를 구축
+- 핵심 경로:
+  - 데이터셋 생성: `scripts/prepare_autorag_from_csv.py`
+  - 통합 파이프라인: `scripts/run_pipeline.py`
+  - AutoRAG 실행: `scripts/run_autorag_optimization.py`
+  - 로컬 파인튜닝: `scripts/finetune_local.py`
+- 주요 산출물:
+  - `data/autorag_csv/corpus.parquet`
+  - `data/autorag_csv/qa.parquet`
+  - `evaluation/autorag_benchmark_csv/`
+  - `models/finetuned/*`
+
+### B안: OpenAI API 기반 서비스형 RAG
+
+- 목적: GPT API와 OpenAI 임베딩을 사용해 서비스형 RAG 생성 및 평가
+- 핵심 경로:
+  - 인덱싱: `scripts/index_documents.py`
+  - 앱 실행: `app.py`
+  - 평가: `scripts/run_evaluation.py`
+  - 릴리즈 게이트: `scripts/check_release_gate.py`
+- 주요 산출물:
+  - `data/processed/*_chunks.json`
+  - `data/vectordb/`
+  - `evaluation/`
+
+### 공통 모듈
+
+- 설정: `configs/config.py`
+- 로딩/청킹/검색/생성: `src/document_loader.py`, `src/chunker.py`, `src/embedder.py`, `src/retriever.py`, `src/generator.py`
+- 오케스트레이션: `src/rag_pipeline.py`
+
+## 구조 도식
+
+상세 버전은 `docs/diagram.md`, 발표용 레이아웃은 `docs/diagram_presentation.md`를 참고하세요.
+
+### 전체 구조
+
+```mermaid
+flowchart LR
+    A[프로젝트 목표] --> B[B안 서비스형 RAG]
+    A --> C[A안 AutoRAG/파인튜닝]
+
+    subgraph Common[공통 모듈]
+        D[configs/config.py]
+        E[src/document_loader.py]
+        F[src/chunker.py]
+        G[src/embedder.py / VectorStore]
+        H[src/retriever.py]
+        I[src/generator.py]
+        J[src/rag_pipeline.py]
+    end
+
+    B --> B1[scripts/index_documents.py]
+    B1 --> E
+    B1 --> F
+    B1 --> G
+    B --> B2[app.py]
+    B2 --> J
+    J --> H
+    J --> I
+    B --> B3[scripts/run_evaluation.py]
+    B --> B4[scripts/check_release_gate.py]
+
+    C --> C1[scripts/run_pipeline.py]
+    C1 --> C2[prepare_autorag_from_csv.py]
+    C1 --> C3[finetune_local.py]
+    C1 --> C4[run_autorag_optimization.py]
+```
+
+### A안 구조
+
+```mermaid
+flowchart TD
+    A[CSV 원천 데이터] --> B[scripts/run_pipeline.py]
+    B --> C[prepare_autorag_from_csv.py]
+    C --> C1[data/autorag_csv/corpus.parquet]
+    C --> C2[data/autorag_csv/qa.parquet]
+    B --> D[finetune_local.py]
+    D --> D1[models/finetuned/*]
+    B --> E[run_autorag_optimization.py]
+    C1 --> E
+    C2 --> E
+    D1 --> E
+    E --> F[최적 조건 선정]
+```
+
+### B안 구조
+
+```mermaid
+flowchart TD
+    A[원본 문서 PDF/HWP] --> B[scripts/index_documents.py]
+    B --> C[DocumentLoader]
+    C --> D[Chunking]
+    D --> E[Embedding]
+    E --> F[Vector DB]
+    U[사용자 질문] --> G[app.py]
+    G --> H[RAGPipeline]
+    H --> I[Retriever]
+    H --> J[Generator]
+    F --> I
+    J --> K[응답 출력]
+    H -. 운영 평가 .-> L[scripts/run_evaluation.py]
+    L --> M[scripts/check_release_gate.py]
+```
 
 ---
 
@@ -27,7 +142,7 @@
 
 | 항목 | Scenario B (OpenAI API) | Scenario A (로컬 HuggingFace) |
 |------|------------------------|------------------------------|
-| 문서 로딩 | PDF / HWP / TXT / CSV | 동일 |
+| 문서 로딩 | PDF / HWP | 동일 |
 | 청킹 | naive / semantic | 동일 |
 | 임베딩 | text-embedding-3-small (dim=512) | BGE-m3-ko / ko-sroberta / E5-large / KoSimCSE / kf-DeBERTa (AutoRAG 5종 비교) |
 | 검색 | similarity / MMR / hybrid + multi-query / rerank | 동일 |
@@ -65,6 +180,10 @@
 - `core` 모드: 운영 핵심 지표 중심 (빠르고 비용 절감)
 - `detailed` 모드: 모델/프롬프트/튜닝 분석 지표 포함
 
+현재 구현 기준:
+- 서비스 평가 스크립트(`scripts/run_evaluation.py`)는 사실상 **B안(OpenAI 기반)** 기준으로 작성되어 있습니다.
+- A안 AutoRAG 평가는 `scripts/run_autorag_optimization.py` 및 `scripts/run_pipeline.py` 경로를 사용합니다.
+
 핵심 엔트리:
 - `scripts/run_evaluation.py`
 - `scripts/check_release_gate.py`
@@ -80,6 +199,12 @@
 
 ```bash
 pip install -r requirements.txt
+```
+
+AutoRAG 실험은 메인 스택과 의존성 충돌 가능성이 있어 별도 환경 또는 `requirements-autorag.txt` 사용을 권장합니다.
+
+```bash
+pip install -r requirements-autorag.txt
 ```
 
 `requirements.txt`에서 통합 관리하는 주요 패키지:
@@ -98,9 +223,50 @@ pip install peft trl bitsandbytes accelerate datasets
 - Scenario A 로컬 모델은 `/srv/shared_data/models/`에서 직접 로드하며 HF_TOKEN이 불필요합니다.
 - 로컬 PC에서는 HuggingFace Hub에서 자동 다운로드됩니다 (`HF_HOME` 환경변수로 캐시 경로 지정 가능).
 
+## 3) 현재 검증 상태와 주의사항
+
+### 정적 검증
+
+- `python3 -m compileall app.py configs src scripts apps` 통과
+
+### 확인된 주의사항
+
+- `app.py`의 B안 기본 컬렉션은 `rfp_chunk600`인데, 실제 벡터스토어에 이 컬렉션이 없으면 빈 컬렉션이 새로 생성될 수 있습니다.
+- 서비스 평가 스크립트는 B안 전용 흐름에 가깝고, A안 AutoRAG 결과를 동일한 방식으로 직접 검증하지는 않습니다.
+- `DocumentLoader`의 일반 파일 로딩은 현재 PDF/HWP 중심입니다. CSV는 `csv_row_per_doc` 특수 모드에서 메타데이터 CSV를 문서처럼 쓰는 경로입니다.
+- `scripts/check_env.py`는 환경이 완전하지 않으면 초기에 실패할 수 있으므로, 현재 상태에서는 참고용으로만 봐야 합니다.
+
+### 권장 실행 순서
+
+#### A안
+
+```bash
+# 1) CSV 기반 AutoRAG 데이터셋 생성
+python scripts/prepare_autorag_from_csv.py --output-dir data/autorag_csv
+
+# 2) AutoRAG만 먼저 검증
+python scripts/run_pipeline.py --steps data,autorag
+
+# 3) 필요 시 파인튜닝 포함
+python scripts/run_pipeline.py --steps finetune,autorag --finetune-models kanana-1.5
+```
+
+#### B안
+
+```bash
+# 1) 문서 인덱싱
+python scripts/index_documents.py --scenario B --collection rfp_chunk1200
+
+# 2) 앱 실행
+streamlit run app.py
+
+# 3) 평가/게이트
+python scripts/check_release_gate.py
+```
+
 ---
 
-## 3) 빠른 실행 가이드
+## 4) 빠른 실행 가이드
 
 ### 3-1. 인덱싱
 
@@ -114,6 +280,12 @@ python scripts/index_documents.py --scenario B --collection rfp_chunk1200
 
 # 비교용 800자 컬렉션
 python scripts/index_documents.py --scenario B --chunk-size 800 --collection rfp_chunk800
+
+# CSV 기반 정제 corpus.parquet 직접 임베딩
+python scripts/index_documents.py \
+  --scenario B \
+  --from-parquet data/autorag_csv/corpus.parquet \
+  --collection rfp_chunk600
 
 # Batch API 사용 (비용 50% 절감)
 python scripts/index_documents.py --scenario B --use-batch-api --collection rfp_chunk1200
@@ -151,6 +323,7 @@ python scripts/index_documents.py \
 
 | 컬렉션명 | 시나리오 | 임베딩 | chunk_size |
 |---------|---------|--------|-----------|
+| `rfp_chunk600` | B (OpenAI) | text-embedding-3-small (512) | 600 |
 | `rfp_chunk1200` | B (OpenAI) | text-embedding-3-small (512) | 1200 |
 | `rfp_chunk800` | B (OpenAI) | text-embedding-3-small (512) | 800 |
 | `rfp_chunk1200_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 1200 |
@@ -172,7 +345,7 @@ streamlit run app.py
 | 설정 | Scenario B (OpenAI) | Scenario A (로컬 HF) |
 |------|--------------------|--------------------|
 | 실행 모드 | B: OpenAI API | A: 로컬 HuggingFace |
-| 컬렉션 | rfp_chunk1200 / rfp_chunk800 | rfp_chunk1200_a / rfp_chunk1200_a_sroberta |
+| 컬렉션 | rfp_chunk600 / rfp_chunk1200 | rfp_chunk1200_a / rfp_chunk1200_a_sroberta |
 | LLM 모델 | gpt-5-mini / gpt-5-nano / gpt-5 | EXAONE / Gemma3 / Gemma4 등 9종 |
 | 임베딩 모델 | text-embedding-3-small (고정) | BGE-m3-ko / ko-sroberta 선택 |
 | 검색 방식 | similarity / mmr / hybrid | 동일 |
@@ -183,7 +356,7 @@ streamlit run app.py
 
 ---
 
-## 4) AutoRAG 사용 가이드
+## 5) AutoRAG 사용 가이드
 
 ### 4-1. AutoRAG 데이터 생성
 
@@ -304,32 +477,28 @@ autorag run_api --trial_dir evaluation/autorag_benchmark_csv/0 --host 0.0.0.0 --
 ```bash
 # 전체: 데이터 + 파인튜닝(2종) + AutoRAG
 python scripts/run_pipeline.py --steps all \
-  --finetune-models kanana-nano,exaone
+  --finetune-models kanana-1.5,exaone
 
 # 데이터 + AutoRAG (파인튜닝 생략)
 python scripts/run_pipeline.py --steps data,autorag
 
 # 파인튜닝 + AutoRAG (데이터 이미 준비됨)
 python scripts/run_pipeline.py --steps finetune,autorag \
-  --finetune-models kanana-nano \
-  --finetune-epochs 3
+  --finetune-models kanana-1.5 \
+  --finetune-epochs 5
 
 # AutoRAG만 재실행
 python scripts/run_pipeline.py --steps autorag
 
 # 재학습 강제 (기존 결과 덮어쓰기)
 python scripts/run_pipeline.py --steps finetune,autorag \
-  --finetune-models kanana-nano \
+  --finetune-models kanana-1.5 \
   --force-finetune
 
-# 7.8B 모델 — QLoRA 필수 (22GB GPU 메모리 한도)
+# 7.8B 모델 — QLoRA 자동 적용
 python scripts/run_pipeline.py --steps finetune,autorag \
-  --finetune-models exaone-3.5-7.8b \
-  --qlora
+  --finetune-models exaone-deep-7.8b
 
-# Gemma4-26B — 학습 불가, AutoRAG 평가만 (--finetune-models에 포함 시 자동 eval-only 처리)
-python scripts/run_pipeline.py --steps autorag \
-  --finetune-models gemma4-26b
 ```
 
 **주요 옵션**
@@ -338,7 +507,7 @@ python scripts/run_pipeline.py --steps autorag \
 |------|--------|------|
 | `--steps` | `all` | `data`, `finetune`, `autorag` 또는 `all` |
 | `--finetune-models` | (없음) | 쉼표 구분 모델 short name (아래 표 참조) |
-| `--finetune-epochs` | `3` | LoRA 학습 에포크 수 |
+| `--finetune-epochs` | `5` | LoRA 학습 에포크 수 |
 | `--finetune-lr` | `2e-4` | 학습률 |
 | `--max-seq-length` | `1024` | 최대 시퀀스 길이 |
 | `--qlora` | false | 4-bit QLoRA (7.8B 이상, 메모리 제한 환경) |
@@ -351,16 +520,13 @@ python scripts/run_pipeline.py --steps autorag \
 
 | short name | 실제 모델 | 크기 | 비고 |
 |------------|----------|------|------|
-| `kanana-nano` | kanana-nano-2.1b | 4.0G | |
 | `kanana-1.5` | kanana-1.5-2.1b | 4.4G | |
 | `exaone` | EXAONE-4.0-1.2B | 2.4G | trust_remote_code |
 | `exaone-deep-2.4b` | EXAONE-Deep-2.4B | 4.5G | trust_remote_code |
-| `exaone-3.5-7.8b` | EXAONE-3.5-7.8B | 30G | **`--qlora` 필수** |
-| `exaone-deep-7.8b` | EXAONE-Deep-7.8B | 15G | **`--qlora` 필수** |
+| `exaone-deep-7.8b` | EXAONE-Deep-7.8B | 15G | **QLoRA 자동 적용** |
 | `midm` | Midm-2.0-Mini | 4.4G | |
-| `gemma3` | Gemma3-4B | 8.1G | |
-| `gemma4` | Gemma4-E4B | 15G | `--qlora` 권장 |
-| `gemma4-26b` | Gemma4-26B-NVFP4 | 22GB+ | **eval-only** (학습 불가, AutoRAG config만 추가) |
+| `gemma3` | Gemma3-4B | 8.1G | QLoRA 자동 적용 |
+| `gemma4` | Gemma4-E4B | 15G | QLoRA 자동 적용 |
 
 **파이프라인 동작 흐름**
 
@@ -369,7 +535,7 @@ data 단계
   CSV → data/autorag_csv/corpus.parquet + qa.parquet
 
 finetune 단계 (모델별 순차 실행)
-  kanana-nano → models/finetuned/kanana-nano/final
+  kanana-1.5  → models/finetuned/kanana-1.5/final
   exaone      → models/finetuned/exaone/final
   ...
 
@@ -378,7 +544,7 @@ autorag 단계
   │   configs/autorag/local_csv_pipeline.yaml 자동 생성
   │   → evaluation/autorag_benchmark_csv/0/
   │
-  └ Gemma4 그룹 (gemma4 / gemma4-26b — transformers 5.x 필요)
+  └ Gemma4 그룹 (gemma4 — transformers 5.x 필요)
       configs/autorag/local_csv_pipeline_gemma.yaml 자동 생성
       → evaluation/autorag_benchmark_csv_gemma/0/
 ```
@@ -394,16 +560,16 @@ autorag 단계
 ```bash
 # GPU 서버 — LoRA
 python scripts/finetune_local.py \
-  --model-path /srv/shared_data/models/kanana/kanana-nano-2.1b \
-  --output-dir models/finetuned/kanana-nano-rag \
-  --epochs 3
+  --model-path /srv/shared_data/models/kanana/kanana-1.5-2.1b \
+  --output-dir models/finetuned/kanana-1.5 \
+  --epochs 5
 
-# 로컬 PC (8GB GPU) — QLoRA (4-bit 양자화)
+# GPU 서버 — QLoRA (4B 이상 대형 모델, 레지스트리 qlora=True 시 자동 적용)
 python scripts/finetune_local.py \
-  --model-path kakaocorp/kanana-nano-2.1b \
-  --output-dir models/finetuned/kanana-nano-rag \
+  --model-path /srv/shared_data/models/gemma/Gemma3-4B \
+  --output-dir models/finetuned/gemma3 \
   --qlora \
-  --epochs 3
+  --epochs 5
 ```
 
 ### 5-2. OpenAI Fine-tuning
@@ -500,7 +666,6 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 | 모델명 | 크기 | gpu_memory_utilization | 특이사항 |
 |--------|------|------------------------|---------|
 | EXAONE-4.0-1.2B | 2.4G | 0.70 | trust_remote_code 필요 |
-| kanana-nano-2.1b | 4.0G | 0.70 | llama 계열, 한국어 특화 |
 | kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Gemma3-4B | 8.1G | 0.70 | max_model_len: 16384 (131072 기본값은 KV 캐시 초과) |
@@ -519,7 +684,6 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 | HF Hub ID | 크기 | 비고 |
 |-----------|------|------|
 | `LGAI-EXAONE/EXAONE-4.0-1.2B` | 2.4G | trust_remote_code 필요 |
-| `kakaocorp/kanana-nano-2.1b` | 4.0G | |
 | `kakaocorp/kanana-1.5-2.1b` | 4.4G | |
 | `skt/Midm-2.0-Mini-Instruct` | 4.4G | |
 
@@ -529,11 +693,10 @@ python scripts/run_evaluation.py --mode detailed --test-limit 2 --output-dir eva
 |--------|------|------|------------|------|
 | EXAONE-4.0-1.2B | `exaone/EXAONE-4.0-1.2B` | 2.4G | ✅ | 가장 빠름, 테스트 용도 |
 | EXAONE-Deep-2.4B | `exaone/EXAONE-Deep-2.4B` | 4.5G | ✅ | 속도/성능 균형 |
-| EXAONE-3.5-7.8B | `exaone/EXAONE-3.5-7.8B` | 30G | ✅ (22GB 서버) | 한국어 고성능 |
+| EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ | 한국어 추론 특화 |
 | EXAONE-Deep-7.8B | `exaone/EXAONE-Deep-7.8B` | 15G | ✅ | 한국어 추론 특화 |
 | Gemma3-4B | `gemma/Gemma3-4B` | 8.1G | ✅ | 다국어 |
 | Gemma4-E4B | `gemma/Gemma4-E4B` | 15G | ✅ | 멀티모달, 다국어, dense |
-| kanana-nano-2.1b | `kanana/kanana-nano-2.1b` | 4.0G | ✅ | 한국어 특화, 경량 |
 | kanana-1.5-2.1b | `kanana/kanana-1.5-2.1b` | 4.4G | ✅ | 한국어 특화, 경량 |
 | Midm-2.0-Mini | `midm/Midm-2.0-Mini` | 4.4G | ✅ | 한국어 특화, 경량 |
 

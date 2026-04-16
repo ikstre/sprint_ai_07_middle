@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from configs.config import Config
-from src.evaluator import EVALUATION_QUESTIONS, RAGEvaluator
+from src.evaluation.single_dataset import EVALUATION_QUESTIONS
+from src.evaluator import RAGEvaluator
 from src.rag_pipeline import RAGPipeline
 
 
@@ -63,13 +64,14 @@ def run_single_config(
     questions: list[dict],
     use_llm_judge: bool = True,
     use_bertscore: bool = False,
+    collection_name: str = "rfp_chunk600",
 ):
     print(f"\n{'=' * 56}")
     print(f"config: {label}")
     print(f"{'=' * 56}")
 
     pipeline = RAGPipeline(config)
-    pipeline.initialize_vectorstore()
+    pipeline.initialize_vectorstore(collection_name=collection_name)
 
     evaluator = RAGEvaluator(config, generator=pipeline.generator)
     df = evaluator.run_evaluation_suite(
@@ -305,6 +307,12 @@ def main():
     parser.add_argument("--no-judge", action="store_true", help="(legacy) Disable LLM-as-a-judge scoring")
     parser.add_argument("--use-bertscore", action="store_true", help="(legacy) Enable BERTScore")
     parser.add_argument("--output-dir", type=str, default="evaluation")
+    parser.add_argument(
+        "--collection",
+        type=str,
+        default="rfp_chunk600",
+        help="평가에 사용할 ChromaDB 컬렉션 이름 (기본: rfp_chunk600)",
+    )
     args = parser.parse_args()
 
     use_llm_judge, use_bertscore = resolve_mode_flags(
@@ -318,7 +326,7 @@ def main():
     questions = select_questions(args.test_limit)
     output_dir = Path(args.output_dir)
 
-    print(f"mode={args.mode} | judge={use_llm_judge} | bertscore={use_bertscore} | test_limit={args.test_limit or 'all'}")
+    print(f"mode={args.mode} | judge={use_llm_judge} | bertscore={use_bertscore} | test_limit={args.test_limit or 'all'} | collection={args.collection}")
 
     configs = [
         {"label": "similarity_k5", "kwargs": {"retrieval_method": "similarity", "retrieval_top_k": 5}},
@@ -331,7 +339,7 @@ def main():
     for cfg in configs:
         config = Config(
             scenario="B",
-            metadata_csv="data/data_list.csv",
+            metadata_csv="/srv/shared_data/datasets/data_list_cleaned.csv",
             vectordb_dir="data/vectordb",
             **cfg["kwargs"],
         )
@@ -342,6 +350,7 @@ def main():
             questions=questions,
             use_llm_judge=use_llm_judge,
             use_bertscore=use_bertscore,
+            collection_name=args.collection,
         )
         save_mode_csv(df=df, output_dir=output_dir, label=cfg["label"], mode=args.mode)
 
