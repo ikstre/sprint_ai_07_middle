@@ -31,7 +31,7 @@ class Config:
     auto_model_routing: bool = True
     routing_simple_model: str = "gpt-5-nano"       # 단순 질문용 경량 모델
     routing_complexity_threshold: int = 50         # 글자 수 기준 단순/복잡 분기점
-
+    eval_models: list = field(default_factory=lambda: ["gpt-5-mini", "gpt-5", "gpt-5-nano"])
     # ── 시나리오 A: HuggingFace 로컬 모델 설정 ─────────────────────
     # HF_TOKEN은 허깅페이스 허브 비공개 모델 다운로드 시 필요.
     # /srv/shared_data/models/ 의 로컬 모델 사용 시 토큰 없이도 동작한다.
