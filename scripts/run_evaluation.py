@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from configs.config import Config
+from configs import paths
 from src.evaluation.single_dataset import EVALUATION_QUESTIONS
 from src.evaluator import RAGEvaluator
 from src.rag_pipeline import RAGPipeline
@@ -339,8 +340,8 @@ def main():
     for cfg in configs:
         config = Config(
             scenario="B",
-            metadata_csv="/srv/shared_data/datasets/data_list_cleaned.csv",
-            vectordb_dir="data/vectordb",
+            metadata_csv=paths.METADATA_CSV,
+            vectordb_dir=paths.VECTORDB_DIR,
             **cfg["kwargs"],
         )
         summary, df = run_single_config(

@@ -2,11 +2,11 @@
 # AutoRAG 0.3.22 - Scenario A (로컬 HuggingFace 모델 전용)
 #
 # 사용 모델 (vLLM으로 직접 로드):
-#   /srv/shared_data/models/exaone/EXAONE-4.0-1.2B   (2.4G, 빠름)
-#   /srv/shared_data/models/kanana/kanana-1.5-2.1b    (4.4G, 한국어 특화)
-#   /srv/shared_data/models/midm/Midm-2.0-Mini        (4.4G, 한국어 특화)
-#   /srv/shared_data/models/gemma/Gemma3-4B           (8.1G, 순차 로드)
-#   /srv/shared_data/models/gemma/Gemma4-E4B           (15G, 별도 실행)
+#   ${SRV_DATA_DIR}/models/exaone/EXAONE-4.0-1.2B   (2.4G, 빠름)
+#   ${SRV_DATA_DIR}/models/kanana/kanana-1.5-2.1b    (4.4G, 한국어 특화)
+#   ${SRV_DATA_DIR}/models/midm/Midm-2.0-Mini        (4.4G, 한국어 특화)
+#   ${SRV_DATA_DIR}/models/gemma/Gemma3-4B           (8.1G, 순차 로드)
+#   ${SRV_DATA_DIR}/models/gemma/Gemma4-E4B           (15G, 별도 실행)
 #
 # 임베딩 모델 5종 비교:
 #   BGE-m3-ko               (2.2G, 다국어 BGE, 한국어 특화)
@@ -49,7 +49,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/BGE-m3-ko
+      model_name: ${SRV_DATA_DIR}/models/embeddings/BGE-m3-ko
     collection_name: autorag_local_bge
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -61,7 +61,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/ko-sroberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/ko-sroberta-multitask
     collection_name: autorag_local_sroberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -73,7 +73,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/multilingual-e5-large
+      model_name: ${SRV_DATA_DIR}/models/embeddings/multilingual-e5-large
     collection_name: autorag_local_e5_large
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -85,7 +85,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/KoSimCSE-roberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/KoSimCSE-roberta-multitask
     collection_name: autorag_local_kosimcse
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -97,7 +97,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/kf-deberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/kf-deberta-multitask
     collection_name: autorag_local_kf_deberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -157,7 +157,7 @@ node_lines:
           generator_modules:
             # prompt_maker 평가용: EXAONE-4.0-1.2B (빠름)
             - module_type: vllm
-              llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+              llm: ${SRV_DATA_DIR}/models/exaone/EXAONE-4.0-1.2B
               max_tokens: 256
               temperature: 0.1          # 한국어 RAG 권장 (code switching 방지)
               gpu_memory_utilization: 0.70
@@ -189,7 +189,7 @@ node_lines:
           # top_p: 0.80~0.95 — 그리드 서치
           # max_tokens: 2048 — 생성 토큰 최대화 (모델 context 한도 내 자동 제한)
           - module_type: vllm
-            llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+            llm: ${SRV_DATA_DIR}/models/exaone/EXAONE-4.0-1.2B
             max_tokens: 2048
             temperature: [0.1, 0.2, 0.3]
             top_p: [0.80, 0.90, 0.95]
@@ -201,7 +201,7 @@ node_lines:
           # temperature: 0.1~0.3 (Kakao 공식 greedy 기준, 상향 비교)
           # top_p: 0.80~0.95 — 그리드 서치
           - module_type: vllm
-            llm: /srv/shared_data/models/kanana/kanana-1.5-2.1b
+            llm: ${SRV_DATA_DIR}/models/kanana/kanana-1.5-2.1b
             max_tokens: 2048
             temperature: [0.1, 0.2, 0.3]
             top_p: [0.80, 0.90, 0.95]
@@ -213,7 +213,7 @@ node_lines:
           # top_k: 20 (KT 공식 고정)
           # top_p: 0.80~0.95 (KT 공식 0.75 대비 상향 비교)
           - module_type: vllm
-            llm: /srv/shared_data/models/midm/Midm-2.0-Mini
+            llm: ${SRV_DATA_DIR}/models/midm/Midm-2.0-Mini
             max_tokens: 2048
             temperature: [0.7, 0.8, 0.9]
             top_k: 20
@@ -226,7 +226,7 @@ node_lines:
           # top_k: 64 (Google 공식 고정)
           # top_p: 0.90~0.95 (Google 공식 0.95 중심)
           - module_type: vllm
-            llm: /srv/shared_data/models/gemma/Gemma3-4B
+            llm: ${SRV_DATA_DIR}/models/gemma/Gemma3-4B
             max_tokens: 2048
             temperature: [0.9, 1.0]
             top_k: 64

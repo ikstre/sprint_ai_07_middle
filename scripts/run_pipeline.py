@@ -52,33 +52,44 @@ import yaml
 ROOT = Path(__file__).parent.parent
 PYTHON = sys.executable
 
+sys.path.insert(0, str(ROOT))
+from dotenv import load_dotenv
+load_dotenv()
+from configs import paths
+
 # ── 모델 레지스트리 ─────────────────────────────────────────────────
 # short name → 학습/서빙 파라미터
+# model_path는 paths.MODEL_DIR 기반 — .env의 MODEL_DIR 또는 SRV_DATA_DIR로 제어
+def _mp(subpath: str) -> str:
+    """paths.MODEL_DIR 아래 subpath 조합."""
+    return f"{paths.MODEL_DIR}/{subpath}"
+
+
 MODEL_REGISTRY: dict[str, dict] = {
     # ── 1.2B ~ 2.1B: BF16 LoRA, QLoRA 불필요 ─────────────────────────
     "kanana-1.5": {
-        "model_path": "/srv/shared_data/models/kanana/kanana-1.5-2.1b",
+        "model_path": _mp("kanana/kanana-1.5-2.1b"),
         "trust_remote_code": False,
         "qlora": False,
         "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
     },
     "exaone": {
-        "model_path": "/srv/shared_data/models/exaone/EXAONE-4.0-1.2B",
+        "model_path": _mp("exaone/EXAONE-4.0-1.2B"),
         "trust_remote_code": True,
         "qlora": False,
         "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95]},
     },
     "exaone-deep-2.4b": {
-        "model_path": "/srv/shared_data/models/exaone/EXAONE-Deep-2.4B",
+        "model_path": _mp("exaone/EXAONE-Deep-2.4B"),
         "trust_remote_code": True,
         "qlora": False,
         "finetune": {"batch_size": 2, "grad_accum": 8, "lora_r": 16},
         "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95]},
     },
     "midm": {
-        "model_path": "/srv/shared_data/models/midm/Midm-2.0-Mini",
+        "model_path": _mp("midm/Midm-2.0-Mini"),
         "trust_remote_code": False,
         "qlora": False,
         "finetune": {"batch_size": 4, "grad_accum": 4, "lora_r": 16},
@@ -86,7 +97,7 @@ MODEL_REGISTRY: dict[str, dict] = {
     },
     # ── 4B: QLoRA 권장 (22GB GPU에서 BF16 LoRA 가능하나 여유 확보) ──────
     "gemma3": {
-        "model_path": "/srv/shared_data/models/gemma/Gemma3-4B",
+        "model_path": _mp("gemma/Gemma3-4B"),
         "trust_remote_code": False,
         "qlora": True,
         "finetune_capable": True,
@@ -101,7 +112,7 @@ MODEL_REGISTRY: dict[str, dict] = {
     # Gemma4-E4B: 15GB BF16, QLoRA 권장
     # needs_user_site=True: transformers 5.x(user-local) 필요
     "gemma4": {
-        "model_path": "/srv/shared_data/models/gemma/Gemma4-E4B",
+        "model_path": _mp("gemma/Gemma4-E4B"),
         "trust_remote_code": False,
         "qlora": True,
         "finetune_capable": True,
@@ -117,7 +128,7 @@ MODEL_REGISTRY: dict[str, dict] = {
     # ── 7.8B: QLoRA 필수 (22GB GPU에서 BF16 LoRA 불가) ──────────────────
     # exaone-3.5-7.8b: 디스크 용량 제한으로 파인튜닝 제외 (추론 전용 base 모델만 유지)
     "exaone-deep-7.8b": {
-        "model_path": "/srv/shared_data/models/exaone/EXAONE-Deep-7.8B",
+        "model_path": _mp("exaone/EXAONE-Deep-7.8B"),
         "trust_remote_code": True,
         "qlora": True,
         "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
@@ -358,6 +369,41 @@ def _autorag_run(
     print(f"  autorag dashboard --trial_dir {trial_dir}")
 
 
+def _resolve_yaml_env(config_path: Path) -> Path:
+    """YAML 내 ${SRV_DATA_DIR} 등 환경변수 플레이스홀더를 실제 값으로 치환.
+
+    치환이 필요 없으면 원본 경로를 그대로 반환.
+    치환이 필요하면 임시 파일에 저장 후 그 경로를 반환.
+    """
+    import re
+    import tempfile
+
+    content = config_path.read_text(encoding="utf-8")
+
+    def _sub(m: re.Match) -> str:
+        key = m.group(1)
+        val = os.getenv(key)
+        if val is None:
+            # 환경변수 미설정 시 경고만 출력하고 원본 유지
+            print(f"  [경고] 환경변수 미설정: ${{{key}}} — .env 확인 필요")
+            return m.group(0)
+        return val
+
+    replaced = re.sub(r"\$\{([^}]+)\}", _sub, content)
+
+    if replaced == content:
+        return config_path  # 치환 없음 → 원본 사용
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False,
+        encoding="utf-8", prefix="autorag_resolved_",
+    )
+    tmp.write(replaced)
+    tmp.close()
+    print(f"  환경변수 치환 완료: {config_path.name} → {tmp.name}")
+    return Path(tmp.name)
+
+
 def step_autorag(
     args: argparse.Namespace,
     finetuned: list[tuple[str, Path]],
@@ -369,6 +415,9 @@ def step_autorag(
     if not base_config.exists():
         print(f"[ERROR] config 파일 없음: {base_config}")
         sys.exit(1)
+
+    # YAML 내 ${SRV_DATA_DIR} 등 환경변수 치환
+    base_config = _resolve_yaml_env(base_config)
 
     data_dir = ROOT / args.data_dir
 
@@ -559,9 +608,9 @@ def main() -> None:
     )
 
     # 데이터 옵션
-    parser.add_argument("--csv-path", default="/srv/shared_data/datasets/data_list_cleaned.csv")
-    parser.add_argument("--data-dir", default="data/autorag_csv",
-                        help="corpus/qa parquet 저장 위치 (기본: data/autorag_csv)")
+    parser.add_argument("--csv-path", default=paths.METADATA_CSV)
+    parser.add_argument("--data-dir", default=paths.AUTORAG_DATA_DIR,
+                        help=f"corpus/qa parquet 저장 위치 (기본: {paths.AUTORAG_DATA_DIR})")
     parser.add_argument("--chunk-size", type=int, default=600)
     parser.add_argument("--chunk-overlap", type=int, default=100)
     parser.add_argument("--force-data", action="store_true",
@@ -589,8 +638,8 @@ def main() -> None:
     # AutoRAG 옵션
     parser.add_argument("--config-path", default="configs/autorag/local_csv.yaml",
                         help="기본 AutoRAG config (파인튜닝 시 자동 확장)")
-    parser.add_argument("--project-dir", default="evaluation/autorag_benchmark_csv",
-                        help="AutoRAG 결과 저장 디렉토리")
+    parser.add_argument("--project-dir", default=paths.AUTORAG_PROJECT_DIR,
+                        help=f"AutoRAG 결과 저장 디렉토리 (기본: {paths.AUTORAG_PROJECT_DIR})")
 
     # post_eval 옵션
     parser.add_argument(

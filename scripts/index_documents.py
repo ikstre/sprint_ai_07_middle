@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from configs.config import Config
+from configs import paths
 from src.document_loader import DocumentLoader
 from src.chunker import chunk_documents
 from src.rag_pipeline import RAGPipeline
@@ -169,8 +170,8 @@ def main():
     )
     # Scenario A 전용: 로컬 모델 경로 선택
     _LOCAL_EMB = {
-        "bge": "/srv/shared_data/models/embeddings/BGE-m3-ko",
-        "sroberta": "/srv/shared_data/models/embeddings/ko-sroberta-multitask",
+        "bge": f"{paths.MODEL_DIR}/embeddings/BGE-m3-ko",
+        "sroberta": f"{paths.MODEL_DIR}/embeddings/ko-sroberta-multitask",
     }
     parser.add_argument(
         "--hf-embedding-model",
@@ -242,8 +243,8 @@ def main():
     config = Config(
         scenario=args.scenario,
         documents_dir=args.documents_dir,
-        metadata_csv="/srv/shared_data/datasets/data_list_cleaned.csv",
-        vectordb_dir="data/vectordb",
+        metadata_csv=paths.METADATA_CSV,
+        vectordb_dir=paths.VECTORDB_DIR,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         chunking_method=args.method,

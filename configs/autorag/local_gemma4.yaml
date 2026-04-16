@@ -1,7 +1,7 @@
 # ============================================================
 # AutoRAG - Gemma4-E4B 전용 (별도 실행용)
 #
-# 모델: /srv/shared_data/models/gemma/Gemma4-E4B
+# 모델: ${SRV_DATA_DIR}/models/gemma/Gemma4-E4B
 #   - Gemma 4 4B dense 모델 (multimodal: vision + audio + text)
 #   - BF16 (~15GB), MoE 없음 (enable_moe_block: false)
 #   - max_position_embeddings: 131072
@@ -30,7 +30,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/BGE-m3-ko
+      model_name: ${SRV_DATA_DIR}/models/embeddings/BGE-m3-ko
     collection_name: autorag_gemma4_bge
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -41,7 +41,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/ko-sroberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/ko-sroberta-multitask
     collection_name: autorag_gemma4_sroberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -52,7 +52,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/multilingual-e5-large
+      model_name: ${SRV_DATA_DIR}/models/embeddings/multilingual-e5-large
     collection_name: autorag_gemma4_e5_large
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -63,7 +63,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/KoSimCSE-roberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/KoSimCSE-roberta-multitask
     collection_name: autorag_gemma4_kosimcse
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -74,7 +74,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/kf-deberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/kf-deberta-multitask
     collection_name: autorag_gemma4_kf_deberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -133,7 +133,7 @@ node_lines:
             - metric_name: rouge
           generator_modules:
             - module_type: vllm
-              llm: /srv/shared_data/models/gemma/Gemma4-E4B
+              llm: ${SRV_DATA_DIR}/models/gemma/Gemma4-E4B
               max_tokens: 512
               temperature: 1.0
               top_k: 64
@@ -166,7 +166,7 @@ node_lines:
           # dense 모델 (MoE 없음), multimodal (vision+audio+text)
           # temperature: 1.0, top_k: 64, top_p: 0.95 (Google 공식)
           - module_type: vllm
-            llm: /srv/shared_data/models/gemma/Gemma4-E4B
+            llm: ${SRV_DATA_DIR}/models/gemma/Gemma4-E4B
             max_tokens: 512
             temperature: [0.9, 1.0]
             top_k: 64

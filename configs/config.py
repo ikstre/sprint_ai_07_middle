@@ -4,8 +4,13 @@ RFP RAG 시스템 설정
 """
 
 import os
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from configs import paths
 
 
 @dataclass
@@ -15,9 +20,9 @@ class Config:
 
     # ── 데이터 경로 ────────────────────────────────────────────────
     documents_dir: str = "data/documents"
-    processed_dir: str = "data/processed"
-    metadata_csv: str = "/srv/shared_data/datasets/data_list_cleaned.csv"
-    vectordb_dir: str = "data/vectordb"
+    processed_dir: str = field(default_factory=lambda: paths.PROCESSED_DIR)
+    metadata_csv: str = field(default_factory=lambda: paths.METADATA_CSV)
+    vectordb_dir: str = field(default_factory=lambda: paths.VECTORDB_DIR)
 
     # ── 시나리오 B: OpenAI API 설정 ────────────────────────────────
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
@@ -40,7 +45,7 @@ class Config:
     # 임베딩 모델 (로컬 경로 또는 HuggingFace Hub 모델명)
     # 권장: BGE-m3-ko (한국어 특화, 1024-dim)
     # 대안: ko-sroberta-multitask (768-dim, 경량)
-    hf_embedding_model: str = "/srv/shared_data/models/embeddings/BGE-m3-ko"
+    hf_embedding_model: str = field(default_factory=lambda: paths.EMBEDDING_MODEL_PATH)
 
     # 채팅 모델 (로컬 경로 또는 HuggingFace Hub 모델명)
     # 빠른 테스트 : /srv/shared_data/models/exaone/EXAONE-4.0-1.2B  (2.4G)
@@ -48,7 +53,7 @@ class Config:
     # 한국어 고성능: /srv/shared_data/models/exaone/EXAONE-3.5-7.8B  (30G)
     # 다국어      : /srv/shared_data/models/gemma/Gemma3-4B           (8.1G)
     #             : /srv/shared_data/models/gemma/Gemma4-E4B           (15G)
-    hf_chat_model: str = "/srv/shared_data/models/exaone/EXAONE-4.0-1.2B"
+    hf_chat_model: str = field(default_factory=lambda: paths.CHAT_MODEL_PATH)
 
     hf_embedding_dim: int = 1024   # BGE-m3-ko: 1024 / ko-sroberta: 768
     device: str = "auto"           # "auto": cuda → mps → cpu 자동 감지

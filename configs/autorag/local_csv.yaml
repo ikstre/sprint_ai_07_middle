@@ -23,7 +23,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/BGE-m3-ko
+      model_name: ${SRV_DATA_DIR}/models/embeddings/BGE-m3-ko
     collection_name: autorag_csv_bge
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -34,7 +34,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/ko-sroberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/ko-sroberta-multitask
     collection_name: autorag_csv_sroberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -45,7 +45,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/multilingual-e5-large
+      model_name: ${SRV_DATA_DIR}/models/embeddings/multilingual-e5-large
     collection_name: autorag_csv_e5_large
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -56,7 +56,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/KoSimCSE-roberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/KoSimCSE-roberta-multitask
     collection_name: autorag_csv_kosimcse
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -67,7 +67,7 @@ vectordb:
     db_type: chroma
     embedding_model:
       type: huggingface
-      model_name: /srv/shared_data/models/embeddings/kf-deberta-multitask
+      model_name: ${SRV_DATA_DIR}/models/embeddings/kf-deberta-multitask
     collection_name: autorag_csv_kf_deberta
     client_type: persistent
     path: ${PROJECT_DIR}/resources/chroma
@@ -130,7 +130,7 @@ node_lines:
             # max_tokens=512: generation_gt 최대 ~240토큰 기준 2배 여유
             # vLLM에서 max_tokens는 출력 예약분 → 줄일수록 입력 공간 증가
             - module_type: vllm
-              llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+              llm: ${SRV_DATA_DIR}/models/exaone/EXAONE-4.0-1.2B
               max_tokens: 512
               temperature: 0.1
               gpu_memory_utilization: 0.70
@@ -197,7 +197,7 @@ node_lines:
 
           # ── EXAONE-4.0-1.2B (2.4G) ───────────────────────────────────
           - module_type: vllm
-            llm: /srv/shared_data/models/exaone/EXAONE-4.0-1.2B
+            llm: ${SRV_DATA_DIR}/models/exaone/EXAONE-4.0-1.2B
             max_tokens: [256, 512, 1024]
             temperature: [0.1, 0.2]
             top_p: [0.85, 0.95]
@@ -207,7 +207,7 @@ node_lines:
 
           # ── kanana-1.5-2.1b (4.4G) ───────────────────────────────────
           - module_type: vllm
-            llm: /srv/shared_data/models/kanana/kanana-1.5-2.1b
+            llm: ${SRV_DATA_DIR}/models/kanana/kanana-1.5-2.1b
             max_tokens: [256, 512, 1024]
             temperature: [0.1, 0.2]
             top_p: [0.85, 0.95]
@@ -216,7 +216,7 @@ node_lines:
 
           # ── Midm-2.0-Mini (4.4G) ─────────────────────────────────────
           - module_type: vllm
-            llm: /srv/shared_data/models/midm/Midm-2.0-Mini
+            llm: ${SRV_DATA_DIR}/models/midm/Midm-2.0-Mini
             max_tokens: [256, 512, 1024]
             temperature: [0.7, 0.8]
             top_k: 20
@@ -226,7 +226,7 @@ node_lines:
 
           # ── Gemma3-4B (8.1G) ─────────────────────────────────────────
           - module_type: vllm
-            llm: /srv/shared_data/models/gemma/Gemma3-4B
+            llm: ${SRV_DATA_DIR}/models/gemma/Gemma3-4B
             max_tokens: [256, 512, 1024]
             temperature: [0.9, 1.0]
             top_k: 64
