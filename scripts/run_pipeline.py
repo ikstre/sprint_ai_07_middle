@@ -8,15 +8,25 @@
 
 파인튜닝이 포함되면 완료된 모델을 AutoRAG config에 자동으로 추가합니다.
 
+단계:
+  data       CSV → corpus.parquet + qa.parquet
+  index      corpus.parquet → ChromaDB 인덱싱 (post_eval용 컬렉션)
+  finetune   지정 모델 LoRA 파인튜닝 (모델별 순차 실행)
+  autorag    AutoRAG 최적화 평가
+  post_eval  AutoRAG 최적 config → run_evaluation.py
+
 사용 예:
-  # 전체: 데이터 + 파인튜닝 + AutoRAG
+  # 전체: 데이터 + 인덱싱 + 파인튜닝 + AutoRAG + 평가
   python scripts/run_pipeline.py --steps all \\
     --finetune-models kanana-1.5,exaone
 
-  # 데이터 준비 + AutoRAG (파인튜닝 생략)
-  python scripts/run_pipeline.py --steps data,autorag
+  # 파인튜닝 없이 전체 실행 (권장)
+  python scripts/run_pipeline.py --steps data,index,autorag,post_eval
 
-  # 파인튜닝 + AutoRAG (데이터 이미 준비됨)
+  # 데이터 + 인덱싱 + AutoRAG (파인튜닝 생략)
+  python scripts/run_pipeline.py --steps data,index,autorag
+
+  # 파인튜닝 + AutoRAG (데이터/인덱싱 이미 완료)
   python scripts/run_pipeline.py --steps finetune,autorag \\
     --finetune-models kanana-1.5
 
@@ -188,6 +198,30 @@ def step_data(args: argparse.Namespace) -> None:
         "--chunk-size", str(args.chunk_size),
         "--chunk-overlap", str(args.chunk_overlap),
     ])
+
+
+# ── Step 1b: ChromaDB 인덱싱 ────────────────────────────────────────
+
+def step_index(args: argparse.Namespace) -> None:
+    """corpus.parquet → ChromaDB 인덱싱 (post_eval / run_evaluation.py용)."""
+    _section(f"Step 1b / index — corpus.parquet → ChromaDB ({args.eval_collection})")
+
+    corpus = ROOT / args.data_dir / "corpus.parquet"
+    if not corpus.exists():
+        print(f"  [ERROR] corpus.parquet 없음: {corpus}")
+        print("  data 단계를 먼저 실행하거나 --data-dir을 확인하세요.")
+        sys.exit(1)
+
+    cmd = [
+        PYTHON, str(ROOT / "scripts/index_documents.py"),
+        "--scenario", args.index_scenario,
+        "--from-parquet", str(corpus),
+        "--collection", args.eval_collection,
+    ]
+    if args.index_scenario == "A":
+        cmd += ["--hf-embedding-model", args.hf_embedding_model]
+
+    _run(cmd)
 
 
 # ── Step 2: 파인튜닝 ────────────────────────────────────────────────
@@ -641,24 +675,39 @@ def main() -> None:
     parser.add_argument("--project-dir", default=paths.AUTORAG_PROJECT_DIR,
                         help=f"AutoRAG 결과 저장 디렉토리 (기본: {paths.AUTORAG_PROJECT_DIR})")
 
-    # post_eval 옵션
+    # 인덱싱 옵션
+    parser.add_argument(
+        "--index-scenario",
+        default="B",
+        choices=["A", "B"],
+        help="index 단계 시나리오 (기본: B — OpenAI 임베딩)",
+    )
+    parser.add_argument(
+        "--hf-embedding-model",
+        default="bge",
+        choices=["bge", "sroberta"],
+        help="index 단계 Scenario A 임베딩 모델 (기본: bge)",
+    )
+
+    # post_eval / index 공통 옵션
     parser.add_argument(
         "--eval-collection",
         default="rfp_chunk600",
-        help="post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk600)",
+        help="index/post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk600)",
     )
 
     args = parser.parse_args()
 
     # 단계 파싱
     if args.steps.strip().lower() == "all":
-        steps = {"data", "finetune", "autorag", "post_eval"}
+        steps = {"data", "index", "finetune", "autorag", "post_eval"}
     else:
         steps = {s.strip().lower() for s in args.steps.split(",")}
 
-    invalid = steps - {"data", "finetune", "autorag", "post_eval"}
+    valid_steps = {"data", "index", "finetune", "autorag", "post_eval"}
+    invalid = steps - valid_steps
     if invalid:
-        print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: data, finetune, autorag, post_eval, all")
+        print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: {', '.join(sorted(valid_steps))}, all")
         sys.exit(1)
 
     # 지정 모델 분류: 학습 가능 / 평가 전용
@@ -689,6 +738,9 @@ def main() -> None:
     if "data" in steps:
         step_data(args)
 
+    if "index" in steps:
+        step_index(args)
+
     if "finetune" in steps:
         finetuned = step_finetune(args)
 
@@ -699,6 +751,8 @@ def main() -> None:
         step_post_eval(args)
 
     _section("파이프라인 완료")
+    if "index" in steps:
+        print(f"인덱싱 컬렉션: {args.eval_collection} (scenario {args.index_scenario})")
     if finetuned:
         print(f"학습된 모델:")
         for name, path in finetuned:
