@@ -22,16 +22,22 @@ CSV 한 행이 곧 한 RFP 문서이며, `사업 요약` 컬럼을 generation_gt
 retrieval_gt는 공고번호 기반으로 자동 연결되므로 ground truth 오류가 없습니다.
 
 ```bash
+# --csv-path와 --output-dir은 .env의 METADATA_CSV, AUTORAG_DATA_DIR이 기본값
 python scripts/prepare_autorag_from_csv.py \
-  --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \
-  --output-dir data/autorag_csv \
+  --chunk-size 600 \
+  --chunk-overlap 100
+
+# 경로를 명시적으로 지정할 경우
+python scripts/prepare_autorag_from_csv.py \
+  --csv-path $METADATA_CSV \
+  --output-dir $AUTORAG_DATA_DIR \
   --chunk-size 600 \
   --chunk-overlap 100
 ```
 
 - 산출물
   - `data/autorag_csv/corpus.parquet` — 664청크 (summary 95 + detail 569)
-  - `data/autorag_csv/qa.parquet` — 285 QA쌍 (문서당 3종 질문)
+  - `data/autorag_csv/qa.parquet` — 431 QA쌍 (CSV 285 + single_dataset 96 + multi_dataset 50)
 
 청크 구조:
 - `chunk_0000`: 발주기관 + 사업명 + 사업 요약 (고정, retrieval_gt가 여기를 가리킴)
@@ -95,10 +101,8 @@ python scripts/download_models.py           # 생성모델 + 임베딩 3종
 # python scripts/download_models.py --embed-only  # 임베딩만
 # python scripts/download_models.py --gen-only    # 생성모델만
 
-# CSV 기반 데이터 준비 (권장 — 1-A 참조)
-python scripts/prepare_autorag_from_csv.py \
-  --csv-path /srv/shared_data/datasets/data_list_cleaned.csv \
-  --output-dir data/autorag_csv
+# CSV 기반 데이터 준비 (권장 — 1-A 참조, .env의 METADATA_CSV/AUTORAG_DATA_DIR이 기본값)
+python scripts/prepare_autorag_from_csv.py
 
 # Step 1 — CSV 기반 실행 (권장)
 nvidia-smi  # GPU 점유 확인
@@ -219,7 +223,7 @@ python scripts/run_pipeline.py --steps finetune,autorag \
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--steps` | `all` | `data`, `finetune`, `autorag` 또는 `all` |
+| `--steps` | `all` | `data`, `finetune`, `autorag`, `post_eval` 또는 `all` |
 | `--finetune-models` | (없음) | 쉼표 구분 모델 short name (아래 표 참조) |
 | `--finetune-epochs` | `5` | LoRA 학습 에포크 수 |
 | `--finetune-lr` | `2e-4` | 학습률 |
@@ -228,7 +232,10 @@ python scripts/run_pipeline.py --steps finetune,autorag \
 | `--force-data` | false | corpus/qa 재생성 |
 | `--force-finetune` | false | 기존 학습 모델 무시하고 재학습 |
 | `--config-path` | `configs/autorag/local_csv.yaml` | 기본 AutoRAG config |
-| `--project-dir` | `evaluation/autorag_benchmark_csv` | AutoRAG 출력 경로 |
+| `--project-dir` | `.env의 AUTORAG_PROJECT_DIR` | AutoRAG 출력 경로 |
+| `--csv-path` | `.env의 METADATA_CSV` | CSV 데이터 경로 |
+| `--data-dir` | `.env의 AUTORAG_DATA_DIR` | corpus/qa parquet 저장 위치 |
+| `--eval-collection` | `rfp_chunk600` | post_eval 단계 ChromaDB 컬렉션 |
 
 ### `--finetune-models` 지원 모델
 
@@ -317,15 +324,15 @@ python scripts/run_autorag_web.py --trial-path evaluation/autorag_benchmark/0
 # 사전 설치
 pip install peft trl bitsandbytes accelerate datasets
 
-# LoRA — CSV 데이터 기반 (기본값)
+# LoRA — CSV 데이터 기반 ($MODEL_DIR은 .env의 MODEL_DIR 또는 SRV_DATA_DIR/models)
 python scripts/finetune_local.py \
-    --model-path /srv/shared_data/models/kanana/kanana-1.5-2.1b \
+    --model-path $MODEL_DIR/kanana/kanana-1.5-2.1b \
     --output-dir models/finetuned/kanana-1.5 \
     --epochs 5
 
 # QLoRA (4B 이상 모델, 레지스트리 qlora=True 시 자동 적용)
 python scripts/finetune_local.py \
-    --model-path /srv/shared_data/models/gemma/Gemma3-4B \
+    --model-path $MODEL_DIR/gemma/Gemma3-4B \
     --output-dir models/finetuned/gemma3 \
     --qlora --epochs 5
 ```
