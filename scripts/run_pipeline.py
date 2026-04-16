@@ -8,15 +8,25 @@
 
 파인튜닝이 포함되면 완료된 모델을 AutoRAG config에 자동으로 추가합니다.
 
+단계:
+  data       CSV → corpus.parquet + qa.parquet
+  index      corpus.parquet → ChromaDB 인덱싱 (post_eval용 컬렉션)
+  finetune   지정 모델 LoRA 파인튜닝 (모델별 순차 실행)
+  autorag    AutoRAG 최적화 평가
+  post_eval  AutoRAG 최적 config → run_evaluation.py
+
 사용 예:
-  # 전체: 데이터 + 파인튜닝 + AutoRAG
+  # 전체: 데이터 + 인덱싱 + 파인튜닝 + AutoRAG + 평가
   python scripts/run_pipeline.py --steps all \\
     --finetune-models kanana-1.5,exaone
 
-  # 데이터 준비 + AutoRAG (파인튜닝 생략)
-  python scripts/run_pipeline.py --steps data,autorag
+  # 파인튜닝 없이 전체 실행 (권장)
+  python scripts/run_pipeline.py --steps data,index,autorag,post_eval
 
-  # 파인튜닝 + AutoRAG (데이터 이미 준비됨)
+  # 데이터 + 인덱싱 + AutoRAG (파인튜닝 생략)
+  python scripts/run_pipeline.py --steps data,index,autorag
+
+  # 파인튜닝 + AutoRAG (데이터/인덱싱 이미 완료)
   python scripts/run_pipeline.py --steps finetune,autorag \\
     --finetune-models kanana-1.5
 
@@ -188,6 +198,30 @@ def step_data(args: argparse.Namespace) -> None:
         "--chunk-size", str(args.chunk_size),
         "--chunk-overlap", str(args.chunk_overlap),
     ])
+
+
+# ── Step 1b: ChromaDB 인덱싱 ────────────────────────────────────────
+
+def step_index(args: argparse.Namespace) -> None:
+    """corpus.parquet → ChromaDB 인덱싱 (post_eval / run_evaluation.py용)."""
+    _section(f"Step 1b / index — corpus.parquet → ChromaDB ({args.eval_collection})")
+
+    corpus = ROOT / args.data_dir / "corpus.parquet"
+    if not corpus.exists():
+        print(f"  [ERROR] corpus.parquet 없음: {corpus}")
+        print("  data 단계를 먼저 실행하거나 --data-dir을 확인하세요.")
+        sys.exit(1)
+
+    cmd = [
+        PYTHON, str(ROOT / "scripts/index_documents.py"),
+        "--scenario", args.index_scenario,
+        "--from-parquet", str(corpus),
+        "--collection", args.eval_collection,
+    ]
+    if args.index_scenario == "A":
+        cmd += ["--hf-embedding-model", args.hf_embedding_model]
+
+    _run(cmd)
 
 
 # ── Step 2: 파인튜닝 ────────────────────────────────────────────────
@@ -370,22 +404,38 @@ def _autorag_run(
 
 
 def _resolve_yaml_env(config_path: Path) -> Path:
-    """YAML 내 ${SRV_DATA_DIR} 등 환경변수 플레이스홀더를 실제 값으로 치환.
+    """YAML 내 ${SRV_DATA_DIR} 등 우리 플레이스홀더를 실제 경로로 치환.
 
-    치환이 필요 없으면 원본 경로를 그대로 반환.
+    - ${SRV_DATA_DIR}, ${MODEL_DIR} 등은 paths.py 기본값으로 치환
+    - ${PROJECT_DIR}는 AutoRAG가 런타임에 직접 처리하므로 건드리지 않음
     치환이 필요하면 임시 파일에 저장 후 그 경로를 반환.
     """
     import re
     import tempfile
 
+    # AutoRAG 자체 변수는 제외하고 우리 변수만 처리
+    _AUTORAG_VARS = {"PROJECT_DIR"}
+
+    # paths.py 기본값을 우선 사용 (.env 미설정 시에도 정상 동작)
+    _OUR_VARS: dict[str, str] = {
+        "SRV_DATA_DIR": paths.SRV_DATA_DIR,
+        "MODEL_DIR":    paths.MODEL_DIR,
+        "METADATA_CSV": paths.METADATA_CSV,
+        "VECTORDB_DIR": paths.VECTORDB_DIR,
+    }
+
     content = config_path.read_text(encoding="utf-8")
 
     def _sub(m: re.Match) -> str:
         key = m.group(1)
+        if key in _AUTORAG_VARS:
+            return m.group(0)          # AutoRAG 전용 변수는 그대로 유지
+        if key in _OUR_VARS:
+            return _OUR_VARS[key]
+        # 나머지는 환경변수에서 탐색, 없으면 원본 유지
         val = os.getenv(key)
         if val is None:
-            # 환경변수 미설정 시 경고만 출력하고 원본 유지
-            print(f"  [경고] 환경변수 미설정: ${{{key}}} — .env 확인 필요")
+            print(f"  [경고] 알 수 없는 플레이스홀더: ${{{key}}} — 치환 생략")
             return m.group(0)
         return val
 
@@ -400,7 +450,7 @@ def _resolve_yaml_env(config_path: Path) -> Path:
     )
     tmp.write(replaced)
     tmp.close()
-    print(f"  환경변수 치환 완료: {config_path.name} → {tmp.name}")
+    print(f"  경로 치환 완료 ({paths.SRV_DATA_DIR}): {config_path.name} → {tmp.name}")
     return Path(tmp.name)
 
 
@@ -641,25 +691,46 @@ def main() -> None:
     parser.add_argument("--project-dir", default=paths.AUTORAG_PROJECT_DIR,
                         help=f"AutoRAG 결과 저장 디렉토리 (기본: {paths.AUTORAG_PROJECT_DIR})")
 
-    # post_eval 옵션
+    # 인덱싱 옵션
+    parser.add_argument(
+        "--index-scenario",
+        default="B",
+        choices=["A", "B"],
+        help="index 단계 시나리오 (기본: B — OpenAI 임베딩)",
+    )
+    parser.add_argument(
+        "--hf-embedding-model",
+        default="bge",
+        choices=["bge", "sroberta"],
+        help="index 단계 Scenario A 임베딩 모델 (기본: bge)",
+    )
+
+    # post_eval / index 공통 옵션
     parser.add_argument(
         "--eval-collection",
         default="rfp_chunk600",
-        help="post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk600)",
+        help="index/post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk600)",
     )
 
     args = parser.parse_args()
 
     # 단계 파싱
-    if args.steps.strip().lower() == "all":
-        steps = {"data", "finetune", "autorag", "post_eval"}
+    _is_all = args.steps.strip().lower() == "all"
+    if _is_all:
+        steps = {"data", "index", "finetune", "autorag", "post_eval"}
     else:
         steps = {s.strip().lower() for s in args.steps.split(",")}
 
-    invalid = steps - {"data", "finetune", "autorag", "post_eval"}
+    valid_steps = {"data", "index", "finetune", "autorag", "post_eval"}
+    invalid = steps - valid_steps
     if invalid:
-        print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: data, finetune, autorag, post_eval, all")
+        print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: {', '.join(sorted(valid_steps))}, all")
         sys.exit(1)
+
+    # --steps all 이고 --finetune-models 미지정이면 레지스트리 전체 모델 자동 포함
+    if _is_all and not args.finetune_models.strip():
+        args.finetune_models = ",".join(MODEL_REGISTRY.keys())
+        print(f"[all 모드] 파인튜닝 모델 자동 선택: {args.finetune_models}")
 
     # 지정 모델 분류: 학습 가능 / 평가 전용
     requested_models = [m.strip() for m in args.finetune_models.split(",") if m.strip()]
@@ -689,6 +760,9 @@ def main() -> None:
     if "data" in steps:
         step_data(args)
 
+    if "index" in steps:
+        step_index(args)
+
     if "finetune" in steps:
         finetuned = step_finetune(args)
 
@@ -699,6 +773,8 @@ def main() -> None:
         step_post_eval(args)
 
     _section("파이프라인 완료")
+    if "index" in steps:
+        print(f"인덱싱 컬렉션: {args.eval_collection} (scenario {args.index_scenario})")
     if finetuned:
         print(f"학습된 모델:")
         for name, path in finetuned:

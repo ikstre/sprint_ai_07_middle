@@ -37,6 +37,63 @@ from src.document_loader import clean_text, apply_filter
 
 
 # ─────────────────────────────────────────────────────────────────
+# 파일별 문장 단위 청킹
+# ─────────────────────────────────────────────────────────────────
+
+# 한국어 서술형 어미 + 마침표 뒤 공백을 문장 경계로 인식
+_SENTENCE_BOUNDARY = re.compile(
+    r"(?<=[다됩임음]\.)\s+"
+    r"|(?<=습니다\.)\s+"
+    r"|(?<=합니다\.)\s+"
+    r"|(?<=됩니다\.)\s+"
+    r"|(?<=입니다\.)\s+"
+    r"|(?<=했습니다\.)\s+"
+)
+
+
+def _chunk_by_sentences(text: str, chunk_size: int) -> list[str]:
+    """
+    한 파일의 텍스트를 문장 단위로 분리한 뒤 chunk_size 이하로 묶어 반환.
+
+    - 청크는 반드시 완전한 문장으로 시작하고 끝남
+    - 파일 경계를 절대 넘지 않음 (호출 자체가 파일당 1회)
+    - 문장 분리 실패(영문/숫자 위주) 시 naive_chunk로 폴백
+    """
+    sentences = [s.strip() for s in _SENTENCE_BOUNDARY.split(text) if s.strip()]
+
+    if not sentences:
+        # 한국어 문장 패턴 없음 → naive_chunk 폴백 (overlap 없이)
+        return [sc["text"] for sc in naive_chunk(text, chunk_size, chunk_overlap=0)]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for sent in sentences:
+        sent_len = len(sent)
+
+        if sent_len > chunk_size:
+            # 단일 문장이 chunk_size 초과 → 강제 분할 후 편입
+            if current:
+                chunks.append(" ".join(current))
+                current, current_len = [], 0
+            chunks.extend(sc["text"] for sc in naive_chunk(sent, chunk_size, chunk_overlap=0))
+            continue
+
+        if current_len + sent_len + 1 > chunk_size and current:
+            chunks.append(" ".join(current))
+            current, current_len = [sent], sent_len
+        else:
+            current.append(sent)
+            current_len += sent_len + (1 if len(current) > 1 else 0)
+
+    if current:
+        chunks.append(" ".join(current))
+
+    return [c for c in chunks if c.strip()]
+
+
+# ─────────────────────────────────────────────────────────────────
 # 유틸리티
 # ─────────────────────────────────────────────────────────────────
 
@@ -124,12 +181,13 @@ def build_corpus(df: pd.DataFrame, csv_path: str, chunk_size: int, chunk_overlap
             "start_end_idx": (0, len(summary_contents)),
         })
 
-        # ── chunk_0001+: 상세 텍스트 분할 ───────────────────────────
+        # ── chunk_0001+: 상세 텍스트 분할 (파일 단위, 문장 경계 기준) ──
         detail_text = _sanitize(clean_text(apply_filter(텍스트)))
         if len(detail_text) > chunk_size:
-            sub_chunks = naive_chunk(detail_text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-            for sc_idx, sc in enumerate(sub_chunks, start=1):
-                sc_text = _sanitize(sc["text"])
+            # 파일 하나의 텍스트만 받아 문장 단위로 청킹 → 파일 경계 절대 불침범
+            sentence_chunks = _chunk_by_sentences(detail_text, chunk_size)
+            for sc_idx, sc_text in enumerate(sentence_chunks, start=1):
+                sc_text = _sanitize(sc_text)
                 if not sc_text:
                     continue
                 rows.append({
