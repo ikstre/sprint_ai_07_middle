@@ -18,6 +18,12 @@ data/vectordb/
 # Finetuned model weights (large binary files — use NAS or shared storage)
 models/finetuned/
 
+# Local shared data (models, datasets — use NAS or shared storage)
+shared_data/
+
+# CUDA installer
+cuda-keyring*.deb
+
 # Python cache
 __pycache__/
 *.pyc
