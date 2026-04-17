@@ -26,6 +26,9 @@
 
 import os
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # ── 서버 루트 ──────────────────────────────────────────────────────────────
 SRV_DATA_DIR: str = os.getenv("SRV_DATA_DIR", "/srv/shared_data")
 
