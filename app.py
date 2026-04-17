@@ -46,9 +46,10 @@ with st.sidebar:
         ]
     else:
         _collections = [
-            "rfp_chunk1200_a",
+            "rfp_chunk600_a",
             "rfp_chunk800_a",
-            "rfp_chunk1200_a_sroberta",
+            "rfp_chunk1000_a",
+            "rfp_chunk1200_a",
         ]
 
     collection = st.selectbox(
