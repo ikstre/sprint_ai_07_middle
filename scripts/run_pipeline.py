@@ -662,7 +662,7 @@ def main() -> None:
     parser.add_argument("--data-dir", default=paths.AUTORAG_DATA_DIR,
                         help=f"corpus/qa parquet 저장 위치 (기본: {paths.AUTORAG_DATA_DIR})")
     parser.add_argument("--chunk-size", type=int, default=600)
-    parser.add_argument("--chunk-overlap", type=int, default=100)
+    parser.add_argument("--chunk-overlap", type=int, default=50)
     parser.add_argument("--force-data", action="store_true",
                         help="corpus/qa가 존재해도 재생성")
 
@@ -673,8 +673,8 @@ def main() -> None:
         help="파인튜닝할 모델 short name (쉼표 구분). "
              f"선택: {', '.join(MODEL_REGISTRY.keys())}",
     )
-    parser.add_argument("--finetune-epochs", type=int, default=5,
-                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 5)")
+    parser.add_argument("--finetune-epochs", type=int, default=10,
+                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 10)")
     parser.add_argument("--early-stop-patience", type=int, default=3,
                         help="eval_loss 개선 없이 허용할 epoch 수 (0=비활성화, 기본: 3)")
     parser.add_argument("--finetune-lr", type=float, default=2e-4)
