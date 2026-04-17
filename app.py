@@ -46,9 +46,10 @@ with st.sidebar:
         ]
     else:
         _collections = [
-            "rfp_chunk1200_a",
+            "rfp_chunk600_a",
             "rfp_chunk800_a",
-            "rfp_chunk1200_a_sroberta",
+            "rfp_chunk1000_a",
+            "rfp_chunk1200_a",
         ]
 
     collection = st.selectbox(
@@ -61,7 +62,7 @@ with st.sidebar:
     if scenario_key == "B":
         model = st.selectbox(
             "LLM 모델",
-            ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
+            ["gpt-4o-mini", "gpt-4o-mini", "gpt-4o"],
             index=0,
         )
         temperature = 0.1       # gpt-5 미지원, 내부적으로만 유지

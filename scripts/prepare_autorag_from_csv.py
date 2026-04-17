@@ -322,18 +322,16 @@ def build_qa_from_eval_dataset(corpus_df: pd.DataFrame) -> pd.DataFrame:
             skipped += 1
             continue
 
-        # 각 기관에 대해 corpus에서 매칭 doc_id 수집
+        # 각 기관에 대해 corpus에서 매칭 doc_id 수집 (해당 기관의 모든 청크 포함)
+        # chunk_size에 따라 청크 수가 달라지므로 chunk_0000/0001 고정 대신 전체 포함
         matched_ids: list[str] = []
         for org in orgs:
             org_lower = org.strip().lower()
             mask = corp["_org"].apply(
                 lambda x: org_lower in x.lower() or x.lower() in org_lower
             )
-            for _, row in corp[mask & corp["doc_id"].str.endswith("::chunk_0000")].iterrows():
+            for _, row in corp[mask].sort_values("doc_id").iterrows():
                 matched_ids.append(row["doc_id"])
-                detail_id = row["doc_id"].replace("::chunk_0000", "::chunk_0001")
-                if detail_id in corpus_ids:
-                    matched_ids.append(detail_id)
 
         if not matched_ids:
             skipped += 1
@@ -385,13 +383,13 @@ def main() -> None:
     parser.add_argument(
         "--chunk-overlap",
         type=int,
-        default=100,
+        default=50,
         help="청크 간 중첩 크기. 기본 100.",
     )
     parser.add_argument(
         "--min-text-len",
         type=int,
-        default=50,
+        default=30,
         help="이보다 짧은 텍스트 행은 스킵. 기본 50.",
     )
     parser.add_argument(

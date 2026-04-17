@@ -20,7 +20,7 @@
 터미널에서 아래 명령어를 입력하여 전처리를 수행합니다.
 
 ```bash
-python data_cleaner.py
+python scripts/data_cleaner.py
 ```
 
 ### 4. 핵심 처리 로직

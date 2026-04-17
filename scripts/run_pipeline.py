@@ -396,8 +396,9 @@ def _autorag_run(
         use_user_site=use_user_site,
     )
 
-    trial_dir = project_dir / "0"
-    print(f"\n[{label}] 결과:")
+    trial_dirs = sorted([d for d in project_dir.iterdir() if d.is_dir() and d.name.isdigit()], key=lambda d: int(d.name))
+    trial_dir = trial_dirs[-1] if trial_dirs else project_dir / "0"
+    print(f"\n[{label}] 결과 (trial {trial_dir.name}):")
     print(f"  cat {trial_dir}/retrieve_node_line/*/summary.csv")
     print(f"  cat {trial_dir}/post_retrieve_node_line/*/summary.csv")
     print(f"  autorag dashboard --trial_dir {trial_dir}")
@@ -533,6 +534,108 @@ def step_autorag(
             print(f"    --gemma4-dir {gemma_project}")
 
 
+# ── Step 4b: AutoRAG 최적 임베딩 모델 → ChromaDB 인덱싱 ────────────
+
+# AutoRAG vectordb 이름 → index_documents.py --hf-embedding-model 키
+_AUTORAG_VDB_TO_EMB: dict[str, str] = {
+    "local_bge":        "bge",
+    "local_sroberta":   "sroberta",
+    "local_e5_large":   "e5",
+    "local_kosimcse":   "kosimcse",
+    "local_kf_deberta": "kf_deberta",
+}
+
+
+def _read_best_embedding(trial_dir: Path) -> str:
+    """AutoRAG semantic_retrieval summary.csv에서 최고 성능 임베딩 모델 키를 반환.
+
+    Returns:
+        index_documents.py --hf-embedding-model 값 (기본: "bge")
+    """
+    import ast
+    import pandas as pd
+
+    best_emb = "bge"
+    best_score = -1.0
+
+    semantic_dir = trial_dir / "retrieve_node_line" / "semantic_retrieval"
+    if not semantic_dir.exists():
+        print(f"  [경고] semantic_retrieval 없음: {semantic_dir}")
+        return best_emb
+
+    for summary_csv in semantic_dir.rglob("summary.csv"):
+        try:
+            df = pd.read_csv(summary_csv)
+        except Exception:
+            continue
+
+        score_col = next(
+            (c for c in ["retrieval_f1", "retrieval_ndcg", "retrieval_map"] if c in df.columns),
+            None,
+        )
+        if score_col is None:
+            continue
+
+        best_row = df.loc[df[score_col].idxmax()]
+        score = float(best_row[score_col])
+        if score <= best_score:
+            continue
+
+        try:
+            params = best_row.get("module_params", "{}")
+            if isinstance(params, str):
+                params = ast.literal_eval(params)
+            vdb_name = params.get("vectordb", "")
+            emb_key = _AUTORAG_VDB_TO_EMB.get(vdb_name, "bge")
+        except Exception:
+            emb_key = "bge"
+
+        best_score = score
+        best_emb = emb_key
+
+    print(f"  AutoRAG 최적 임베딩 모델: {best_emb} (score={best_score:.4f})")
+    return best_emb
+
+
+def step_best_index(args: argparse.Namespace, size: int) -> str:
+    """AutoRAG 결과에서 최적 임베딩 모델을 읽어 ChromaDB 인덱싱 수행.
+
+    Returns:
+        생성된 컬렉션 이름
+    """
+    _section(f"Step 4b / best_index — AutoRAG 최적 임베딩으로 인덱싱 (chunk={size})")
+
+    project_dir = ROOT / (f"evaluation/autorag_benchmark_csv_{size}" if args.chunk_sizes else args.project_dir)
+    trial_dirs = sorted(
+        [d for d in project_dir.iterdir() if d.is_dir() and d.name.isdigit()],
+        key=lambda d: int(d.name),
+    ) if project_dir.exists() else []
+
+    if not trial_dirs:
+        print(f"  [스킵] AutoRAG 결과 없음: {project_dir}")
+        return ""
+
+    trial_dir = trial_dirs[-1]
+    best_emb = _read_best_embedding(trial_dir)
+    collection = f"rfp_chunk{size}_{best_emb}"
+
+    corpus = ROOT / f"data/autorag_csv_{size}/corpus.parquet"
+    if not corpus.exists():
+        print(f"  [ERROR] corpus.parquet 없음: {corpus}")
+        return ""
+
+    cmd = [
+        PYTHON, str(ROOT / "scripts/index_documents.py"),
+        "--scenario", "A",
+        "--from-parquet", str(corpus),
+        "--collection", collection,
+        "--hf-embedding-model", best_emb,
+    ]
+    print(f"  컬렉션: {collection} | 임베딩: {best_emb}")
+    _run(cmd)
+    return collection
+
+
 # ── Step 5: AutoRAG 결과 → run_evaluation.py 자동 실행 ──────────────
 
 # AutoRAG 모듈명 → 우리 retrieval_method 매핑
@@ -662,6 +765,8 @@ def main() -> None:
     parser.add_argument("--data-dir", default=paths.AUTORAG_DATA_DIR,
                         help=f"corpus/qa parquet 저장 위치 (기본: {paths.AUTORAG_DATA_DIR})")
     parser.add_argument("--chunk-size", type=int, default=600)
+    parser.add_argument("--chunk-sizes", type=str, default="",
+                        help="청크 크기 다중 실행 (쉼표 구분, 예: 600,800,1000,1200). 지정 시 각 크기별로 data+index+autorag 반복 실행")
     parser.add_argument("--chunk-overlap", type=int, default=100)
     parser.add_argument("--force-data", action="store_true",
                         help="corpus/qa가 존재해도 재생성")
@@ -673,8 +778,8 @@ def main() -> None:
         help="파인튜닝할 모델 short name (쉼표 구분). "
              f"선택: {', '.join(MODEL_REGISTRY.keys())}",
     )
-    parser.add_argument("--finetune-epochs", type=int, default=5,
-                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 5)")
+    parser.add_argument("--finetune-epochs", type=int, default=10,
+                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 10)")
     parser.add_argument("--early-stop-patience", type=int, default=3,
                         help="eval_loss 개선 없이 허용할 epoch 수 (0=비활성화, 기본: 3)")
     parser.add_argument("--finetune-lr", type=float, default=2e-4)
@@ -694,9 +799,9 @@ def main() -> None:
     # 인덱싱 옵션
     parser.add_argument(
         "--index-scenario",
-        default="B",
+        default="A",
         choices=["A", "B"],
-        help="index 단계 시나리오 (기본: B — OpenAI 임베딩)",
+        help="index 단계 시나리오 (기본: A — 로컬 HuggingFace 임베딩)",
     )
     parser.add_argument(
         "--hf-embedding-model",
@@ -708,8 +813,8 @@ def main() -> None:
     # post_eval / index 공통 옵션
     parser.add_argument(
         "--eval-collection",
-        default="rfp_chunk600",
-        help="index/post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk600)",
+        default="",
+        help="index/post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk{chunk_size}_a 또는 rfp_chunk{chunk_size})",
     )
 
     args = parser.parse_args()
@@ -721,11 +826,15 @@ def main() -> None:
     else:
         steps = {s.strip().lower() for s in args.steps.split(",")}
 
-    valid_steps = {"data", "index", "finetune", "autorag", "post_eval"}
+    valid_steps = {"data", "index", "finetune", "autorag", "best_index", "post_eval"}
     invalid = steps - valid_steps
     if invalid:
         print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: {', '.join(sorted(valid_steps))}, all")
         sys.exit(1)
+
+    # --steps all 이면 best_index 포함
+    if _is_all:
+        steps.add("best_index")
 
     # --steps all 이고 --finetune-models 미지정이면 레지스트리 전체 모델 자동 포함
     if _is_all and not args.finetune_models.strip():
@@ -755,53 +864,105 @@ def main() -> None:
     if eval_only_models:
         print(f"평가 전용 모델 ({len(eval_only_models)}종): {', '.join(eval_only_models)}")
 
+    # ── 청크 크기 목록 결정 ─────────────────────────────────────────
+    if args.chunk_sizes.strip():
+        chunk_sizes = [int(s.strip()) for s in args.chunk_sizes.split(",") if s.strip()]
+        multi_chunk = True
+    else:
+        chunk_sizes = [args.chunk_size]
+        multi_chunk = False
+
+    _orig_data_dir      = args.data_dir
+    _orig_project_dir   = args.project_dir
+    _orig_eval_col      = args.eval_collection  # "" = 자동 유도
+
+    # ── 파인튜닝: 청크 크기 무관, 한 번만 실행 ─────────────────────
+    # multi_chunk 시 첫 번째 크기 데이터를 먼저 준비한 뒤 학습
     finetuned: list[tuple[str, Path]] = []
-
-    if "data" in steps:
-        step_data(args)
-
-    if "index" in steps:
-        step_index(args)
-
     if "finetune" in steps:
+        if multi_chunk:
+            first_size = chunk_sizes[0]
+            args.chunk_size = first_size
+            args.data_dir = f"data/autorag_csv_{first_size}"
+            if not _orig_eval_col:
+                suffix = "_a" if args.index_scenario == "A" else ""
+                args.eval_collection = f"rfp_chunk{first_size}{suffix}"
+            if "data" in steps:
+                step_data(args)
         finetuned = step_finetune(args)
 
-    if "autorag" in steps:
-        # finetune 단계를 건너뛴 경우, 디스크에서 완료된 모델을 자동 감지
-        if not finetuned and finetune_models:
-            for name in finetune_models:
-                final_dir = ROOT / "models/finetuned" / name / "final"
-                if final_dir.exists():
-                    finetuned.append((name, final_dir))
-                    print(f"  [자동 감지] 기학습 모델: {name} → {final_dir}")
-        step_autorag(args, finetuned, eval_only_models)
+    # finetune 단계를 건너뛴 경우, 디스크에서 완료된 모델을 자동 감지 (루프 전 1회)
+    if "autorag" in steps and not finetuned and finetune_models:
+        for name in finetune_models:
+            final_dir = ROOT / "models/finetuned" / name / "final"
+            if final_dir.exists():
+                finetuned.append((name, final_dir))
+                print(f"  [자동 감지] 기학습 모델: {name} → {final_dir}")
 
-    if "post_eval" in steps:
-        step_post_eval(args)
+    # ── 청크 크기별 반복 실행 ────────────────────────────────────────
+    for size in chunk_sizes:
+        if multi_chunk:
+            _section(f"청크 크기 {size}자 ({chunk_sizes.index(size)+1}/{len(chunk_sizes)})")
+            args.chunk_size   = size
+            args.data_dir     = f"data/autorag_csv_{size}"
+            args.project_dir  = f"evaluation/autorag_benchmark_csv_{size}"
 
+        # eval_collection: 명시적 지정 없으면 크기별 자동 유도
+        if not _orig_eval_col:
+            suffix = "_a" if args.index_scenario == "A" else ""
+            args.eval_collection = f"rfp_chunk{size}{suffix}"
+        else:
+            args.eval_collection = _orig_eval_col
+
+        if "data" in steps:
+            step_data(args)
+
+        if "index" in steps:
+            step_index(args)
+
+        if "autorag" in steps:
+            step_autorag(args, finetuned, eval_only_models)
+
+        if "best_index" in steps:
+            step_best_index(args, size)
+
+        if "post_eval" in steps:
+            step_post_eval(args)
+
+    # ── 최종 요약 ────────────────────────────────────────────────────
     _section("파이프라인 완료")
+    if multi_chunk:
+        print(f"처리된 청크 크기: {chunk_sizes}")
     if "index" in steps:
-        print(f"인덱싱 컬렉션: {args.eval_collection} (scenario {args.index_scenario})")
+        if multi_chunk:
+            for size in chunk_sizes:
+                suffix = "_a" if args.index_scenario == "A" else ""
+                col = _orig_eval_col or f"rfp_chunk{size}{suffix}"
+                print(f"  인덱싱 컬렉션: {col} (scenario {args.index_scenario})")
+        else:
+            print(f"인덱싱 컬렉션: {args.eval_collection} (scenario {args.index_scenario})")
     if finetuned:
-        print(f"학습된 모델:")
+        print("학습된 모델:")
         for name, path in finetuned:
             print(f"  {name}: {path}")
     if eval_only_models:
         print(f"평가 전용 모델 (원본 경로 사용): {', '.join(eval_only_models)}")
     if "autorag" in steps:
-        trial_dir = ROOT / args.project_dir / "0"
-        print(f"\nAutoRAG 결과 (일반 모델): {ROOT / args.project_dir}")
-        print(f"  대시보드: autorag dashboard --trial_dir {trial_dir}")
-
         has_gemma = any(MODEL_REGISTRY[m].get("needs_user_site") for m in eval_only_models)
         has_gemma = has_gemma or any(
             MODEL_REGISTRY[n].get("needs_user_site") for n, _ in finetuned
         )
-        if has_gemma:
-            gemma_trial = ROOT / (args.project_dir + "_gemma") / "0"
-            print(f"\nAutoRAG 결과 (Gemma4): {ROOT / (args.project_dir + '_gemma')}")
-            print(f"  대시보드: autorag dashboard --trial_dir {gemma_trial}")
-
+        for size in chunk_sizes:
+            proj = ROOT / (f"evaluation/autorag_benchmark_csv_{size}" if multi_chunk else _orig_project_dir)
+            trial_dirs = sorted([d for d in proj.iterdir() if d.is_dir() and d.name.isdigit()], key=lambda d: int(d.name)) if proj.exists() else []
+            trial_dir = trial_dirs[-1] if trial_dirs else proj / "0"
+            print(f"\nAutoRAG 결과 (일반 모델, chunk={size}): {proj}")
+            print(f"  대시보드: autorag dashboard --trial_dir {trial_dir}")
+            if has_gemma:
+                gemma_proj = ROOT / (proj.name + "_gemma")
+                gemma_trial = gemma_proj / "0"
+                print(f"AutoRAG 결과 (Gemma4, chunk={size}): {gemma_proj}")
+                print(f"  대시보드: autorag dashboard --trial_dir {gemma_trial}")
     if "post_eval" in steps:
         print(f"\npost_eval 결과: {ROOT / 'evaluation' / 'post_autorag'}")
 

@@ -170,8 +170,14 @@ def main():
     )
     # Scenario A 전용: 로컬 모델 경로 선택
     _LOCAL_EMB = {
-        "bge": f"{paths.MODEL_DIR}/embeddings/BGE-m3-ko",
-        "sroberta": f"{paths.MODEL_DIR}/embeddings/ko-sroberta-multitask",
+        "bge":        f"{paths.MODEL_DIR}/embeddings/BGE-m3-ko",
+        "sroberta":   f"{paths.MODEL_DIR}/embeddings/ko-sroberta-multitask",
+        "e5":         f"{paths.MODEL_DIR}/embeddings/multilingual-e5-large",
+        "kosimcse":   f"{paths.MODEL_DIR}/embeddings/KoSimCSE-roberta-multitask",
+        "kf_deberta": f"{paths.MODEL_DIR}/embeddings/kf-deberta-multitask",
+    }
+    _LOCAL_EMB_DIM = {
+        "bge": 1024, "sroberta": 768, "e5": 1024, "kosimcse": 768, "kf_deberta": 768,
     }
     parser.add_argument(
         "--hf-embedding-model",
@@ -180,8 +186,11 @@ def main():
         choices=list(_LOCAL_EMB.keys()),
         help=(
             "Scenario A 임베딩 모델 선택 (기본값: bge)\n"
-            "  bge       → BGE-m3-ko (1024-dim, 한국어 특화)\n"
-            "  sroberta  → ko-sroberta-multitask (768-dim, 경량)"
+            "  bge        → BGE-m3-ko (1024-dim, 한국어 특화)\n"
+            "  sroberta   → ko-sroberta-multitask (768-dim, 경량)\n"
+            "  e5         → multilingual-e5-large (1024-dim, 다국어)\n"
+            "  kosimcse   → KoSimCSE-roberta-multitask (768-dim)\n"
+            "  kf_deberta → kf-deberta-multitask (768-dim)"
         ),
     )
     parser.add_argument(
@@ -223,7 +232,7 @@ def main():
 
     # Scenario A 임베딩 모델 경로 및 차원 결정
     hf_emb_path = _LOCAL_EMB.get(args.hf_embedding_model, args.hf_embedding_model)
-    hf_emb_dim = 768 if args.hf_embedding_model == "sroberta" else 1024
+    hf_emb_dim = _LOCAL_EMB_DIM.get(args.hf_embedding_model, 1024)
 
     print("=" * 60)
     print("RFP 문서 인덱싱")

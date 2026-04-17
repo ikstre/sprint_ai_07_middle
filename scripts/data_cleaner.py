@@ -155,7 +155,24 @@ class SmartOriginFrequencyMatcher:
         if '텍스트' in df_cleaned.columns:
             df_cleaned['텍스트'] = df_cleaned['텍스트'].apply(self.clean_text_content)
 
-        output_file = "./data/data_list_cleaned.csv"
+        # 원문 텍스트 계열 컬럼은 metadata 오염 방지를 위해 최종 CSV에서 제외
+        excluded_text_cols = {"텍스트", "text", "content", "contents", "본문", "내용", "원문", "원문텍스트"}
+        drop_cols = []
+        for c in df_cleaned.columns:
+            normalized = re.sub(r"[\s_]+", "", str(c).strip().lower())
+            if (
+                normalized in excluded_text_cols
+                or normalized.endswith("text")
+                or normalized.endswith("contents")
+            ):
+                drop_cols.append(c)
+        if drop_cols:
+            df_cleaned.drop(columns=drop_cols, inplace=True)
+            print(f"** 원문 컬럼 제외: {', '.join(drop_cols)} **")
+
+        # 입력 CSV와 같은 디렉토리에 cleaned 파일을 생성한다.
+        output_dir = os.path.dirname(self.csv_path) if os.path.dirname(self.csv_path) else "."
+        output_file = os.path.join(output_dir, "data_list_cleaned.csv")
         df_cleaned.to_csv(output_file, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_ALL, escapechar='\\')
         print(f"\n** 작업 완료! 최종 파일: {output_file} **")
 
