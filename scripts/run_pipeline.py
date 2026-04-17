@@ -142,7 +142,7 @@ MODEL_REGISTRY: dict[str, dict] = {
         "trust_remote_code": True,
         "qlora": True,
         "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
-        "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
+        "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192, "gpu_memory_utilization": 0.90},
     },
 }
 
@@ -767,6 +767,13 @@ def main() -> None:
         finetuned = step_finetune(args)
 
     if "autorag" in steps:
+        # finetune 단계를 건너뛴 경우, 디스크에서 완료된 모델을 자동 감지
+        if not finetuned and finetune_models:
+            for name in finetune_models:
+                final_dir = ROOT / "models/finetuned" / name / "final"
+                if final_dir.exists():
+                    finetuned.append((name, final_dir))
+                    print(f"  [자동 감지] 기학습 모델: {name} → {final_dir}")
         step_autorag(args, finetuned, eval_only_models)
 
     if "post_eval" in steps:
