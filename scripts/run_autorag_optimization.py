@@ -56,7 +56,7 @@ _patch_transformers_validation()
 
 _AUTORAG_PYTHON = os.getenv("AUTORAG_PYTHON", "")
 if _AUTORAG_PYTHON and Path(_AUTORAG_PYTHON).exists() and \
-        sys.executable != str(Path(_AUTORAG_PYTHON).resolve()):
+        str(Path(sys.executable).resolve()) != str(Path(_AUTORAG_PYTHON).resolve()):
     print(f"[AutoRAG] 인터프리터 전환: {_AUTORAG_PYTHON}")
     result = subprocess.run([_AUTORAG_PYTHON, __file__] + sys.argv[1:])
     sys.exit(result.returncode)

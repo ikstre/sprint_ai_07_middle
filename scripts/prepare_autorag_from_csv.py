@@ -385,13 +385,13 @@ def main() -> None:
     parser.add_argument(
         "--chunk-overlap",
         type=int,
-        default=100,
+        default=50,
         help="청크 간 중첩 크기. 기본 100.",
     )
     parser.add_argument(
         "--min-text-len",
         type=int,
-        default=50,
+        default=30,
         help="이보다 짧은 텍스트 행은 스킵. 기본 50.",
     )
     parser.add_argument(

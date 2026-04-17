@@ -12,14 +12,14 @@ instruction-following 모델을 학습합니다.
     python scripts/finetune_local.py \
         --model-path /srv/shared_data/models/kanana/kanana-1.5-2.1b \
         --output-dir models/finetuned/kanana-1.5 \
-        --epochs 5
+        --epochs 10
 
     # QLoRA (VRAM 제한 환경, 4B+ 모델)
     python scripts/finetune_local.py \
         --model-path /srv/shared_data/models/gemma/Gemma3-4B \
         --output-dir models/finetuned/gemma3 \
         --qlora \
-        --epochs 5
+        --epochs 10
 """
 
 from __future__ import annotations
@@ -460,8 +460,8 @@ def main() -> None:
                         help="Corpus parquet 경로 (기본: data/autorag_csv/corpus.parquet)")
     parser.add_argument("--qlora", action="store_true", help="4-bit QLoRA 사용 (VRAM 절약)")
     parser.add_argument("--trust-remote-code", action="store_true", help="EXAONE 등 커스텀 코드 모델")
-    parser.add_argument("--epochs", type=int, default=5,
-                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 5)")
+    parser.add_argument("--epochs", type=int, default=10,
+                        help="최대 학습 epoch 수 (early stop 시 조기 종료, 기본: 10)")
     parser.add_argument("--early-stop-patience", type=int, default=3,
                         help="eval_loss 개선 없이 허용할 epoch 수 (0=비활성화, 기본: 3)")
     parser.add_argument("--batch-size", type=int, default=2)
