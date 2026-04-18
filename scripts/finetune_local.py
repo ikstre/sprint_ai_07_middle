@@ -431,6 +431,15 @@ def train(args: argparse.Namespace) -> None:
     print("\n저장 후처리 (vLLM 호환성 보장)...")
     _cleanup_merged_model(final_dir)
 
+    # trust_remote_code 모델은 custom *.py 파일이 로컬에 있어야 vLLM이 로드 가능.
+    # save_pretrained()가 이 파일들을 복사하지 않으므로 베이스 모델에서 직접 복사.
+    import shutil as _shutil
+    _base_py_files = list(Path(args.model_path).glob("*.py"))
+    if _base_py_files:
+        for _py in _base_py_files:
+            _shutil.copy2(_py, final_dir / _py.name)
+        print(f"  custom 코드 {len(_base_py_files)}개 복사: {[f.name for f in _base_py_files]}")
+
     # Step 3: 체크포인트 삭제 (디스크 절약)
     _ckpt_deleted = 0
     for _ckpt in output_dir.glob("checkpoint-*"):
