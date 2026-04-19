@@ -80,13 +80,16 @@ class GenerationMetricSuite:
         if not enabled or not self._bertscore_fn or not reference:
             return None
         try:
-            _, _, f1 = self._bertscore_fn(
-                [answer],
-                [reference],
-                lang="ko",
-                verbose=False,
-                rescale_with_baseline=True,
-            )
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                _, _, f1 = self._bertscore_fn(
+                    [answer],
+                    [reference],
+                    lang="ko",
+                    verbose=False,
+                    rescale_with_baseline=False,  # ko 기준선 파일 미존재 → 비활성화
+                )
             return float(f1[0])
         except Exception:
             return None

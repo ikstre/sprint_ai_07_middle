@@ -197,7 +197,11 @@ class RAGEvaluator:
         entry["bertscore_f1"] = self.generation_metrics.bertscore(
             answer, reference, enabled=use_bertscore
         )
-        entry.update(compute_grounding_metrics(answer, retrieved_docs))
+        # 팔로우업 질문은 이전 대화 이력도 grounding 범위에 포함
+        history_text = ""
+        if keep_memory and self.generator is not None:
+            history_text = self.generator.memory.get_context_summary()
+        entry.update(compute_grounding_metrics(answer, retrieved_docs, extra_context=history_text))
 
         decline_ok = compute_decline_accuracy(q_data, answer)
         if decline_ok is not None:

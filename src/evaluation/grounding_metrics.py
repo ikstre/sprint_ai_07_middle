@@ -7,9 +7,17 @@ from __future__ import annotations
 from src.evaluation.utils import safe_div, tokenize
 
 
-def compute_grounding_metrics(answer: str, retrieved_docs: list[dict]) -> dict:
+def compute_grounding_metrics(
+    answer: str,
+    retrieved_docs: list[dict],
+    extra_context: str = "",
+) -> dict:
     answer_tokens = set(tokenize(answer))
-    context = "\n".join(str(d.get("text", ""))[:2000] for d in retrieved_docs)
+    # 청크 절삭 없이 전체 사용 + 팔로우업 대화 이력 포함
+    parts = [str(d.get("text", "")) for d in retrieved_docs]
+    if extra_context:
+        parts.append(extra_context)
+    context = "\n".join(parts)
     context_tokens = set(tokenize(context))
 
     if not answer_tokens:
