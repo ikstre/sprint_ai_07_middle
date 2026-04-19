@@ -920,18 +920,18 @@ def main() -> None:
     _orig_eval_col      = args.eval_collection  # "" = 자동 유도
 
     # ── 파인튜닝: 청크 크기 무관, 한 번만 실행 ─────────────────────
-    # multi_chunk 시 첫 번째 크기 데이터를 먼저 준비한 뒤 학습
+    # 파인튜닝 전에 첫 번째(또는 유일한) 청크 크기 데이터를 먼저 준비
     finetuned: list[tuple[str, Path]] = []
     if "finetune" in steps:
+        first_size = chunk_sizes[0]
+        args.chunk_size = first_size
         if multi_chunk:
-            first_size = chunk_sizes[0]
-            args.chunk_size = first_size
             args.data_dir = f"data/autorag_csv_{first_size}"
-            if not _orig_eval_col:
-                suffix = "_a" if args.index_scenario == "A" else ""
-                args.eval_collection = f"rfp_chunk{first_size}{suffix}"
-            if "data" in steps:
-                step_data(args)
+        if not _orig_eval_col:
+            suffix = "_a" if args.index_scenario == "A" else ""
+            args.eval_collection = f"rfp_chunk{first_size}{suffix}"
+        if "data" in steps:
+            step_data(args)
         finetuned = step_finetune(args)
 
     # finetune 단계를 건너뛴 경우, 디스크에서 완료된 모델을 자동 감지 (루프 전 1회)
