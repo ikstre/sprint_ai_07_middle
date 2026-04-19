@@ -119,7 +119,7 @@ with st.sidebar:
     retrieval_method = st.selectbox(
         "검색 방식",
         ["similarity", "mmr", "hybrid"],
-        index=0,
+        index=2,
     )
     top_k = st.slider("Top-K (검색 결과 수)", 3, 15, 5)
     use_reranker = st.checkbox("Re-ranking 사용", value=False)
@@ -131,7 +131,7 @@ with st.sidebar:
         reasoning_effort = st.select_slider(
             "Reasoning Effort",
             options=["low", "medium", "high"],
-            value="medium",
+            value="low",
             help="low: 빠름/저렴, high: 정확/느림. 단순 질문은 low 권장.",
         )
         auto_model_routing = st.checkbox(
@@ -140,7 +140,7 @@ with st.sidebar:
             help="짧은 질문은 gpt-5-nano, 복잡한 질문은 선택 모델 자동 적용.",
         )
     else:
-        reasoning_effort = "medium"
+        reasoning_effort = "low"
         auto_model_routing = False
 
     st.divider()

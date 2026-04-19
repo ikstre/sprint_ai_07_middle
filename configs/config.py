@@ -31,11 +31,11 @@ class Config:
     openai_embedding_dim: int = 512                # 차원 축소 (원본 1536 → 512, 비용/속도 개선)
 
     # ── OpenAI 고급 설정 ───────────────────────────────────────────
-    reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    reasoning_effort: Literal["low", "medium", "high"] = "low"
     # 쿼리 복잡도 기반 자동 모델 라우팅 (단순 → gpt-5-nano, 복잡 → openai_chat_model)
     auto_model_routing: bool = True
     routing_simple_model: str = "gpt-5-nano"       # 단순 질문용 경량 모델
-    routing_complexity_threshold: int = 50         # 글자 수 기준 단순/복잡 분기점
+    routing_complexity_threshold: int = 80         # 글자 수 기준 단순/복잡 분기점
     eval_models: list = field(default_factory=lambda: ["gpt-5-mini", "gpt-5", "gpt-5-nano"])
     # ── 시나리오 A: HuggingFace 로컬 모델 설정 ─────────────────────
     # HF_TOKEN은 허깅페이스 허브 비공개 모델 다운로드 시 필요.
@@ -67,7 +67,7 @@ class Config:
 
     # ── Retrieval 설정 ─────────────────────────────────────────────
     retrieval_top_k: int = 5
-    retrieval_method: Literal["similarity", "mmr", "hybrid"] = "similarity"
+    retrieval_method: Literal["similarity", "mmr", "hybrid"] = "hybrid"
     mmr_lambda: float = 0.5           # MMR 다양성 파라미터
     max_chunks_per_source: int = 2    # 동일 출처(발주기관+사업명) 청크 최대 개수
     use_reranker: bool = False
@@ -79,8 +79,10 @@ class Config:
     # 시나리오 B (gpt-5 계열): temperature/top_p 미지원, max_completion_tokens만 사용
     temperature: float = 0.1          # Scenario A 전용
     top_p: float = 0.9                # Scenario A 전용
-    max_tokens: int = 16000  # reasoning 모델(gpt-5 계열)은 내부 추론 토큰 포함으로 충분히 크게 설정
-    conversation_memory_k: int = 5    # 유지할 대화 턴 수
+    max_tokens: int = 3500    # gpt-5 계열은 reasoning + 답변 토큰 합산이므로 답변 공간 확보용 상한.
+    conversation_memory_k: int = 3     # 유지할 대화 턴 수
+    max_context_chars_per_doc: int = 800  # 청크별 컨텍스트 최대 길이
+    retrieval_fetch_k_multiplier: int = 2  # per-source 제한을 위한 후보 확장 배수
 
     # ── Vector DB 설정 ─────────────────────────────────────────────
     vectordb_type: Literal["chroma", "faiss"] = "chroma"

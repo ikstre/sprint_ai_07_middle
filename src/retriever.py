@@ -14,6 +14,16 @@ from src.embedder import EmbeddingModel, VectorStore
 class Retriever:
     """다양한 검색 전략을 지원하는 Retriever"""
 
+    @staticmethod
+    def _canonical_metadata_key(key: str) -> str:
+        """CSV 컬럼명과 벡터스토어 메타데이터 키를 일치시키기 위한 정규화."""
+        normalized = str(key).replace(" ", "")
+        if normalized in {"발주기관", "발주처", "기관명"}:
+            return "발주기관"
+        if normalized in {"사업명", "사업명칭"}:
+            return "사업명"
+        return str(key)
+
     def __init__(
         self,
         config: Config,
@@ -40,11 +50,11 @@ class Retriever:
             for _, row in metadata_df.iterrows():
                 org_name = str(row[org_col])
                 if len(org_name) >= 2 and org_name in query:
-                    return {org_col: org_name}
+                    return {self._canonical_metadata_key(org_col): org_name}
                 keywords = re.findall(r"[가-힣]{2,}", org_name)
                 for kw in keywords:
                     if len(kw) >= 3 and kw in query:
-                        return {org_col: org_name}
+                        return {self._canonical_metadata_key(org_col): org_name}
 
         return None
 
@@ -62,13 +72,14 @@ class Retriever:
         self,
         query: str,
         top_k: Optional[int] = None,
-        fetch_k: int = 20,
+        fetch_k: Optional[int] = None,
         lambda_mult: Optional[float] = None,
         where: Optional[dict] = None,
     ) -> list[dict]:
         """MMR 기반 검색: 관련성과 다양성의 균형"""
         k = top_k or self.config.retrieval_top_k
         lam = lambda_mult if lambda_mult is not None else self.config.mmr_lambda
+        fetch_k = fetch_k or max(k * getattr(self.config, "retrieval_fetch_k_multiplier", 2), k + 2)
 
         candidates = self.vector_store.search(query, top_k=fetch_k, where=where)
         if len(candidates) <= k:
@@ -289,8 +300,9 @@ class Retriever:
         method = method or self.config.retrieval_method
         k = top_k or self.config.retrieval_top_k
 
-        # per-source 제한 적용을 위해 충분히 넉넉하게 후보를 가져온다
-        fetch_k = k * 4
+        # per-source 제한 적용용 후보 확장은 하되, 과도한 재검색은 피한다.
+        fetch_multiplier = max(1, getattr(self.config, "retrieval_fetch_k_multiplier", 2))
+        fetch_k = max(k * fetch_multiplier, k + 2)
 
         if self.config.use_multi_query:
             results = self.multi_query_search(

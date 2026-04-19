@@ -2,6 +2,8 @@
 RAG 파이프라인 - 질문 분석 -> 메타데이터 필터 -> 검색 -> 답변 생성
 """
 
+import pandas as pd
+
 from configs.config import Config
 from src.embedder import EmbeddingModel, VectorStore
 from src.generator import RAGGenerator
@@ -17,7 +19,15 @@ class RAGPipeline:
         self.vector_store = VectorStore(config, self.embedding_model)
         self.retriever = Retriever(config, self.vector_store, self.embedding_model)
         self.generator = RAGGenerator(config, self.retriever)
+        self._metadata_df = self._load_metadata_df()
         self._initialized = False
+
+    def _load_metadata_df(self):
+        metadata_path = self.config.metadata_csv
+        try:
+            return pd.read_csv(metadata_path)
+        except Exception:
+            return None
 
     def initialize_vectorstore(self, collection_name: str = "rfp_documents"):
         """기존 컬렉션을 로드한다."""
@@ -75,11 +85,7 @@ class RAGPipeline:
 
     def extract_metadata_filter(self, question: str) -> dict | None:
         """질문에서 메타데이터 필터(기관명 등)를 추출한다."""
-        import pandas as pd
-
-        metadata_path = self.config.metadata_csv
         try:
-            df = pd.read_csv(metadata_path)
-            return self.retriever.build_metadata_filter(question, df)
+            return self.retriever.build_metadata_filter(question, self._metadata_df)
         except Exception:
             return None
