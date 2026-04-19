@@ -165,16 +165,22 @@ class RAGGenerator:
         return "\n\n---\n\n".join(context_parts)
 
     def _enhance_query_with_context(self, query: str) -> str:
-        context_summary = self.memory.get_context_summary()
-        if not context_summary:
+        """이전 사용자 질문을 리트리버 쿼리에 접두어로 추가한다.
+
+        LLM은 messages로 대화 이력을 받지만 리트리버는 쿼리 문자열만 본다.
+        팔로우업 질문이 기관명·문서명을 생략해도 올바른 청크를 찾으려면
+        이전 질문(기관명 포함)을 검색 쿼리에 명시해야 한다.
+        어시스턴트 답변은 길고 노이즈가 많아 임베딩을 분산시키므로 제외한다.
+        """
+        prev_user_queries = [
+            msg["content"][:150]
+            for msg in self.memory.get_messages()
+            if msg["role"] == "user"
+        ]
+        if not prev_user_queries:
             return query
-
-        ambiguous_patterns = ["그", "이", "저", "해당", "그것", "위", "다른", "더"]
-        needs_context = any(query.startswith(p) or f" {p} " in query for p in ambiguous_patterns)
-
-        if needs_context or len(query) < 20:
-            return f"[이전 대화 맥락]\n{context_summary}\n\n[현재 질문]\n{query}"
-        return query
+        prev = " ".join(prev_user_queries[-2:])  # 최근 1~2개 질문만
+        return f"{prev} {query}"
 
     def generate(
         self,
@@ -195,6 +201,7 @@ class RAGGenerator:
             where=where,
             llm_client=self._get_llm_client() if self.config.scenario == "B" else None,
         )
+        self._last_retrieved_docs = retrieved_docs  # 평가기의 org 필터 추출용
 
         context = self._build_context(retrieved_docs)
         rag_prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=query)
