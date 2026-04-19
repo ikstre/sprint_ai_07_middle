@@ -106,7 +106,7 @@ python scripts/run_pipeline.py \
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--steps` | `all` | 실행 단계: `data` `finetune` `index` `autorag` `best_index` `post_eval` |
+| `--steps` | `all` | 실행 단계: `data` `index` `finetune` `autorag` `best_index` |
 | `--chunk-sizes` | (없음) | 다중 청크 크기 (예: `600,800,1000,1200`) — 지정 시 각 크기별 반복 |
 | `--chunk-size` | `600` | 단일 청크 크기 (`--chunk-sizes` 미사용 시) |
 | `--chunk-overlap` | `100` | 청크 중복 길이 |
@@ -241,7 +241,20 @@ streamlit run app.py
 ### Step 3. 평가
 
 ```bash
-python scripts/run_evaluation.py --mode core --output-dir evaluation
+# core 지표 평가 (hit@5, nDCG@5, grounded ratio 등)
+python scripts/run_evaluation.py \
+  --mode core \
+  --collection rfp_chunk600 \
+  --output-dir evaluation
+
+# LLM judge 포함 상세 평가
+python scripts/run_evaluation.py \
+  --mode detailed \
+  --judge on \
+  --collection rfp_chunk600 \
+  --output-dir evaluation
+
+# 릴리즈 게이트 확인
 python scripts/check_release_gate.py
 ```
 
@@ -336,6 +349,14 @@ python scripts/check_release_gate.py
 ### transformers 버전 충돌 (kanana/midm)
 - `run_pipeline.py`는 내부적으로 환경을 자동 처리합니다.
 - 직접 실행 시: `PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py ...`
+
+### B안 — top-k 검색 결과에 여러 RFP 문서 혼합
+- 동일 출처(발주기관+사업명) 청크를 최대 2개로 제한하는 `max_chunks_per_source` 옵션이 기본 적용됩니다.
+- 단일 문서 질문 정확도가 낮으면 `rfp_chunk600` → `rfp_chunk800`으로 컬렉션 변경을 시도하세요.
+
+### B안 — LLM judge 응답 없음 또는 JSON 파싱 실패
+- gpt-5-nano는 내부 추론 예산이 필요해 `max_completion_tokens=4000`으로 자동 설정됩니다.
+- 파싱 실패 시 fallback 점수(3점)로 대체되며 `reasoning` 필드에 원본 응답이 저장됩니다.
 
 ### 환경 진단
 

@@ -1,27 +1,23 @@
 """
-통합 파이프라인 실행기.
+통합 파이프라인 실행기 (A안 전용).
 
 단계:
-  data      CSV → corpus.parquet + qa.parquet
-  finetune  지정 모델 LoRA 파인튜닝 (모델별 순차 실행)
-  autorag   AutoRAG 최적화 평가
+  data        CSV → corpus.parquet + qa.parquet
+  index       corpus.parquet → ChromaDB 인덱싱 (로컬 HF 임베딩, Scenario A)
+  finetune    지정 모델 LoRA 파인튜닝 (모델별 순차 실행)
+  autorag     AutoRAG 최적화 평가
+  best_index  AutoRAG 최적 임베딩 모델로 컬렉션 재인덱싱
 
 파인튜닝이 포함되면 완료된 모델을 AutoRAG config에 자동으로 추가합니다.
-
-단계:
-  data       CSV → corpus.parquet + qa.parquet
-  index      corpus.parquet → ChromaDB 인덱싱 (post_eval용 컬렉션)
-  finetune   지정 모델 LoRA 파인튜닝 (모델별 순차 실행)
-  autorag    AutoRAG 최적화 평가
-  post_eval  AutoRAG 최적 config → run_evaluation.py
+B안(OpenAI API) 평가는 scripts/run_evaluation.py 를 직접 실행하세요.
 
 사용 예:
-  # 전체: 데이터 + 인덱싱 + 파인튜닝 + AutoRAG + 평가
+  # 전체: 데이터 + 인덱싱 + 파인튜닝 + AutoRAG + 최적 재인덱싱
   python scripts/run_pipeline.py --steps all \\
     --finetune-models kanana-1.5,exaone
 
   # 파인튜닝 없이 전체 실행 (권장)
-  python scripts/run_pipeline.py --steps data,index,autorag,post_eval
+  python scripts/run_pipeline.py --steps data,index,autorag,best_index
 
   # 데이터 + 인덱싱 + AutoRAG (파인튜닝 생략)
   python scripts/run_pipeline.py --steps data,index,autorag
@@ -636,110 +632,6 @@ def step_best_index(args: argparse.Namespace, size: int) -> str:
     return collection
 
 
-# ── Step 5: AutoRAG 결과 → run_evaluation.py 자동 실행 ──────────────
-
-# AutoRAG 모듈명 → 우리 retrieval_method 매핑
-_AUTORAG_METHOD_MAP: dict[str, str] = {
-    "bm25":       "hybrid",      # BM25 단독 → 가장 가까운 hybrid
-    "vectordb":   "similarity",  # 순수 벡터 → similarity
-    "hybrid_rrf": "hybrid",
-    "hybrid_cc":  "hybrid",
-}
-
-
-def _read_best_retrieval(trial_dir: Path) -> tuple[str, int]:
-    """AutoRAG retrieve_node_line summary.csv에서 최고 성능 모듈과 top_k를 반환한다.
-
-    Returns:
-        (retrieval_method, top_k)  — 기본값 ("similarity", 5)
-    """
-    import ast
-    import pandas as pd
-
-    best_method = "similarity"
-    best_top_k = 5
-    best_score = -1.0
-
-    retrieve_dir = trial_dir / "retrieve_node_line"
-    if not retrieve_dir.exists():
-        print(f"  [경고] retrieve_node_line 없음: {retrieve_dir}")
-        return best_method, best_top_k
-
-    for summary_csv in retrieve_dir.rglob("summary.csv"):
-        try:
-            df = pd.read_csv(summary_csv)
-        except Exception:
-            continue
-
-        # 지표: retrieval_f1 → retrieval_ndcg → retrieval_map 순으로 시도
-        score_col = next(
-            (c for c in ["retrieval_f1", "retrieval_ndcg", "retrieval_map"] if c in df.columns),
-            None,
-        )
-        if score_col is None:
-            continue
-
-        best_row = df.loc[df[score_col].idxmax()]
-        score = float(best_row[score_col])
-
-        if score <= best_score:
-            continue
-
-        # module_name 파싱 (patch로 model basename일 수도 있음)
-        raw_name = str(best_row.get("module_name", "")).lower()
-        method = next(
-            (v for k, v in _AUTORAG_METHOD_MAP.items() if k in raw_name),
-            "similarity",
-        )
-
-        # top_k 파싱 (module_params JSON에서 추출)
-        top_k = 5
-        try:
-            params = best_row.get("module_params", "{}")
-            if isinstance(params, str):
-                params = ast.literal_eval(params)
-            top_k = int(params.get("top_k", 5))
-        except Exception:
-            pass
-
-        best_score = score
-        best_method = method
-        best_top_k = top_k
-
-    print(f"  AutoRAG 최적 검색 방식: {best_method} | top_k={best_top_k} | score={best_score:.4f}")
-    return best_method, best_top_k
-
-
-def step_post_eval(args: argparse.Namespace) -> None:
-    """AutoRAG 결과에서 최적 검색 설정을 읽어 run_evaluation.py를 자동 실행한다."""
-    _section("Step 4 / post_eval — AutoRAG 최적 config로 RAG 평가")
-
-    trial_dir = ROOT / args.project_dir / "0"
-    if not trial_dir.exists():
-        print(f"  [스킵] AutoRAG 결과 없음: {trial_dir}")
-        print("  autorag 단계를 먼저 실행하세요.")
-        return
-
-    best_method, best_top_k = _read_best_retrieval(trial_dir)
-
-    output_dir = ROOT / "evaluation" / "post_autorag"
-    cmd = [
-        PYTHON, str(ROOT / "scripts/run_evaluation.py"),
-        "--mode", "core",
-        "--collection", args.eval_collection,
-        "--output-dir", str(output_dir),
-    ]
-
-    print(f"  retrieval_method={best_method} | top_k={best_top_k} | collection={args.eval_collection}")
-    print(f"  출력 디렉토리: {output_dir}")
-
-    # run_evaluation.py는 내부적으로 4가지 config를 돌리므로
-    # best config만 추가로 출력 알림
-    print(f"\n  ※ run_evaluation.py는 4가지 검색 config를 비교 실행합니다.")
-    print(f"    AutoRAG 추천 best: {best_method} top_k={best_top_k}")
-
-    _run(cmd, use_user_site=False)
-
 
 # ── 메인 ───────────────────────────────────────────────────────────
 
@@ -756,7 +648,7 @@ def main() -> None:
         default="all",
         help=(
             "실행할 단계 (쉼표 구분 또는 'all'). "
-            "선택: data, finetune, autorag, post_eval. 기본: all"
+            "선택: data, index, finetune, autorag, best_index. 기본: all"
         ),
     )
 
@@ -810,11 +702,11 @@ def main() -> None:
         help="index 단계 Scenario A 임베딩 모델 (기본: bge)",
     )
 
-    # post_eval / index 공통 옵션
+    # index 단계 컬렉션 이름 (기본: 크기별 자동 유도)
     parser.add_argument(
         "--eval-collection",
         default="",
-        help="index/post_eval 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk{chunk_size}_a 또는 rfp_chunk{chunk_size})",
+        help="index 단계에서 사용할 ChromaDB 컬렉션 (기본: rfp_chunk{chunk_size}_a)",
     )
 
     args = parser.parse_args()
@@ -822,17 +714,16 @@ def main() -> None:
     # 단계 파싱
     _is_all = args.steps.strip().lower() == "all"
     if _is_all:
-        steps = {"data", "index", "finetune", "autorag", "post_eval"}
+        steps = {"data", "index", "finetune", "autorag"}
     else:
         steps = {s.strip().lower() for s in args.steps.split(",")}
 
-    valid_steps = {"data", "index", "finetune", "autorag", "best_index", "post_eval"}
+    valid_steps = {"data", "index", "finetune", "autorag", "best_index"}
     invalid = steps - valid_steps
     if invalid:
         print(f"[ERROR] 알 수 없는 단계: {invalid}. 선택: {', '.join(sorted(valid_steps))}, all")
         sys.exit(1)
 
-    # --steps all 이면 best_index 포함
     if _is_all:
         steps.add("best_index")
 
@@ -918,9 +809,6 @@ def main() -> None:
         if "best_index" in steps:
             step_best_index(args, size)
 
-        if "post_eval" in steps:
-            step_post_eval(args)
-
     # ── 최종 요약 ────────────────────────────────────────────────────
     _section("파이프라인 완료")
     if multi_chunk:
@@ -955,8 +843,6 @@ def main() -> None:
                 gemma_trial = gemma_proj / "0"
                 print(f"AutoRAG 결과 (Gemma4, chunk={size}): {gemma_proj}")
                 print(f"  대시보드: autorag dashboard --trial_dir {gemma_trial}")
-    if "post_eval" in steps:
-        print(f"\npost_eval 결과: {ROOT / 'evaluation' / 'post_autorag'}")
 
 
 if __name__ == "__main__":
