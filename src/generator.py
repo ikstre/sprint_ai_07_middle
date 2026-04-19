@@ -14,6 +14,7 @@ from src.retriever import Retriever
 SYSTEM_PROMPT = """당신은 '입찰메이트'의 RFP 분석 AI 어시스턴트입니다.
 항상 검색된 문서 근거를 우선으로 답변하고, 문서에 없는 내용은 추측하지 마세요.
 핵심 요구사항/기관/예산/제출방식/일정 중심으로 간결하게 답변하세요.
+답변에서 확인 가능한 기관명, 사업명, 금액, 일정은 문서 표현을 최대한 그대로 사용하세요.
 """
 
 RAG_PROMPT_TEMPLATE = """아래 컨텍스트를 근거로 질문에 답변하세요.
@@ -28,6 +29,8 @@ RAG_PROMPT_TEMPLATE = """아래 컨텍스트를 근거로 질문에 답변하세
 - 문서 근거 기반으로만 답변
 - 비교 질문이면 항목별 표 또는 목록
 - 근거가 없으면 "문서에서 확인되지 않음"이라고 명시
+- 확인 가능한 경우 답변 첫 부분에 발주기관과 사업명을 명시
+- 금액, 일정, 제출방식, 요구사항은 문서에 나온 표현을 그대로 우선 사용
 """
 
 
@@ -151,30 +154,90 @@ class RAGGenerator:
         print(f"[Scenario A] 모델 로드 완료: {self.config.hf_chat_model}")
         return tokenizer, model
 
+    @staticmethod
+    def _collect_source_rows(retrieved_docs: list[dict]) -> list[dict]:
+        rows = []
+        seen = set()
+        for doc in retrieved_docs:
+            meta = doc.get("metadata", {})
+            row = {
+                "발주기관": meta.get("발주기관") or meta.get("발주 기관"),
+                "사업명": meta.get("사업명"),
+                "사업금액": meta.get("사업금액") or meta.get("사업 금액"),
+                "filename": meta.get("filename"),
+            }
+            key = tuple((k, row.get(k)) for k in ("발주기관", "사업명", "사업금액", "filename"))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+        return rows
+
+    @staticmethod
+    def _is_comparison_query(query: str) -> bool:
+        comparison_keywords = ("비교", "차이", "각각", "서로", "vs", "대비")
+        return any(keyword in query for keyword in comparison_keywords)
+
+    def _build_source_summary(self, retrieved_docs: list[dict], query: str) -> str:
+        rows = self._collect_source_rows(retrieved_docs)
+        if not rows:
+            return ""
+
+        max_rows = 3 if self._is_comparison_query(query) else 1
+        summary_lines = ["[문서 식별 정보]"]
+        for row in rows[:max_rows]:
+            parts = []
+            if row.get("발주기관"):
+                parts.append(f"발주기관: {row['발주기관']}")
+            if row.get("사업명"):
+                parts.append(f"사업명: {row['사업명']}")
+            if row.get("사업금액"):
+                parts.append(f"사업금액: {row['사업금액']}")
+            if not parts and row.get("filename"):
+                parts.append(f"파일명: {row['filename']}")
+            if parts:
+                summary_lines.append("- " + " | ".join(parts))
+
+        return "\n".join(summary_lines) if len(summary_lines) > 1 else ""
+
     def _build_context(self, retrieved_docs: list[dict]) -> str:
         context_parts = []
+        max_chars = max(0, getattr(self.config, "max_context_chars_per_doc", 0))
         for i, doc in enumerate(retrieved_docs, 1):
             meta = doc.get("metadata", {})
-            source_info = []
-            for key in ["사업명", "발주기관", "발주 기관", "filename"]:
-                if key in meta and meta[key]:
-                    source_info.append(f"{key}: {meta[key]}")
-            source_str = " | ".join(source_info) if source_info else f"문서 {i}"
-            context_parts.append(f"[출처: {source_str}]\n{doc['text']}")
+            header_lines = [f"[문서 {i}]"]
+            if meta.get("발주기관") or meta.get("발주 기관"):
+                header_lines.append(f"발주기관: {meta.get('발주기관') or meta.get('발주 기관')}")
+            if meta.get("사업명"):
+                header_lines.append(f"사업명: {meta['사업명']}")
+            if meta.get("사업금액") or meta.get("사업 금액"):
+                header_lines.append(f"사업금액: {meta.get('사업금액') or meta.get('사업 금액')}")
+            if meta.get("filename"):
+                header_lines.append(f"파일명: {meta['filename']}")
+            text = doc["text"]
+            if max_chars and len(text) > max_chars:
+                text = text[:max_chars].rstrip() + "\n...[후략]"
+            context_parts.append("\n".join(header_lines) + f"\n[본문]\n{text}")
 
         return "\n\n---\n\n".join(context_parts)
 
     def _enhance_query_with_context(self, query: str) -> str:
-        context_summary = self.memory.get_context_summary()
-        if not context_summary:
+        """이전 사용자 질문을 리트리버 쿼리에 접두어로 추가한다.
+
+        LLM은 messages로 대화 이력을 받지만 리트리버는 쿼리 문자열만 본다.
+        팔로우업 질문이 기관명·문서명을 생략해도 올바른 청크를 찾으려면
+        이전 질문(기관명 포함)을 검색 쿼리에 명시해야 한다.
+        어시스턴트 답변은 길고 노이즈가 많아 임베딩을 분산시키므로 제외한다.
+        """
+        prev_user_queries = [
+            msg["content"][:150]
+            for msg in self.memory.get_messages()
+            if msg["role"] == "user"
+        ]
+        if not prev_user_queries:
             return query
-
-        ambiguous_patterns = ["그", "이", "저", "해당", "그것", "위", "다른", "더"]
-        needs_context = any(query.startswith(p) or f" {p} " in query for p in ambiguous_patterns)
-
-        if needs_context or len(query) < 20:
-            return f"[이전 대화 맥락]\n{context_summary}\n\n[현재 질문]\n{query}"
-        return query
+        prev = " ".join(prev_user_queries[-2:])  # 최근 1~2개 질문만
+        return f"{prev} {query}"
 
     def generate(
         self,
@@ -195,11 +258,15 @@ class RAGGenerator:
             where=where,
             llm_client=self._get_llm_client() if self.config.scenario == "B" else None,
         )
+        self._last_retrieved_docs = retrieved_docs  # 평가기의 org 필터 추출용
 
+        source_summary = self._build_source_summary(retrieved_docs, query)
         context = self._build_context(retrieved_docs)
         rag_prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=query)
 
         answer, usage = self._call_llm(rag_prompt, stream=stream, query=query)
+        if source_summary and source_summary not in answer:
+            answer = f"{source_summary}\n\n{answer}".strip()
 
         self.memory.add_user_message(query)
         self.memory.add_assistant_message(answer)

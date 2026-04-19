@@ -44,8 +44,41 @@ def check_env_vars() -> bool:
     return ok
 
 
+def check_dual_env_layout() -> bool:
+    print("\n[2] A안 2환경 구성")
+
+    shared_req = Path("requirements-shared.txt")
+    user_req = Path("requirements-user.txt")
+    autorag_req = Path("requirements-autorag.txt")
+    autorag_python = os.getenv("AUTORAG_PYTHON", "")
+
+    print(f"  shared requirements : {'있음' if shared_req.exists() else '없음'} ({shared_req})")
+    print(f"  user requirements   : {'있음' if user_req.exists() else '없음'} ({user_req})")
+    print(f"  autorag requirements: {'있음' if autorag_req.exists() else '없음'} ({autorag_req})")
+
+    ok = shared_req.exists() and user_req.exists() and autorag_req.exists()
+    if not autorag_python:
+        print("  [WARN] AUTORAG_PYTHON 미설정 — A안 AutoRAG는 별도 user env 연결이 필요")
+        return False
+
+    p = Path(autorag_python)
+    if not p.exists():
+        print(f"  [WARN] AUTORAG_PYTHON 실행 파일 없음: {p}")
+        return False
+
+    current = Path(sys.executable).resolve()
+    resolved = p.resolve()
+    if resolved == current:
+        print(f"  [WARN] AUTORAG_PYTHON이 현재 공용환경과 동일함: {resolved}")
+        print("         A안 AutoRAG는 shared env와 분리된 user env 파이썬을 지정해야 함")
+        return False
+
+    print(f"  AUTORAG_PYTHON      : {p}")
+    return ok
+
+
 def check_openai() -> bool:
-    print("\n[2] OpenAI API 연결")
+    print("\n[3] OpenAI API 연결")
     openai_key = os.getenv("OPENAI_API_KEY", "")
     if not openai_key:
         print("  [SKIP] OPENAI_API_KEY 없음")
@@ -53,7 +86,7 @@ def check_openai() -> bool:
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
+        client = OpenAI(api_key=openai_key, timeout=5.0)
         models = client.models.list()
         model_ids = sorted(m.id for m in models)
 
@@ -75,9 +108,9 @@ def check_openai() -> bool:
 
 
 def check_data_dirs() -> bool:
-    print("\n[3] 데이터 경로")
+    print("\n[4] 데이터 경로")
     dirs = {
-        "data/documents": "원본 문서",
+        "data": "원본 문서 / CSV / parquet 입력",
         "data/processed": "전처리 결과",
         "data/vectordb": "벡터DB",
     }
@@ -94,7 +127,7 @@ def check_data_dirs() -> bool:
 
 
 def check_packages() -> bool:
-    print("\n[4] 핵심 패키지")
+    print("\n[5] 핵심 패키지")
     packages = [
         ("openai", "OpenAI SDK"),
         ("chromadb", "ChromaDB"),
@@ -122,6 +155,7 @@ def main() -> None:
 
     results = {
         "환경 변수": check_env_vars(),
+        "A안 2환경": check_dual_env_layout(),
         "OpenAI 연결": check_openai(),
         "데이터 경로": check_data_dirs(),
         "패키지": check_packages(),
