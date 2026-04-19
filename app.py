@@ -62,7 +62,7 @@ with st.sidebar:
     if scenario_key == "B":
         model = st.selectbox(
             "LLM 모델",
-            ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
+            ["gpt-4o-mini", "gpt-4o-mini", "gpt-4o"],
             index=0,
         )
         temperature = 0.1       # gpt-5 미지원, 내부적으로만 유지
