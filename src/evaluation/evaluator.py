@@ -43,6 +43,13 @@ class RAGEvaluator:
         self.results: list[dict] = []
         self.generation_metrics = GenerationMetricSuite()
 
+    @staticmethod
+    def _judge_max_tokens(model: str) -> int:
+        """judge 호출 시 모델별 max_completion_tokens 반환."""
+        if "nano" in model:
+            return 4000   # nano는 내부 추론 토큰 예산이 더 필요
+        return 2000
+
     # ── 단일 모델 judge (하위 호환용) ──────────────────────────────
     def evaluate_with_llm_judge(
         self, question: str, answer: str, context: str, model: str = "gpt-5-mini"
@@ -59,7 +66,7 @@ class RAGEvaluator:
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=3000 if model == "gpt-5-nano" else 2000,  # ← 수정
+            max_completion_tokens=self._judge_max_tokens(model),
             reasoning_effort="low",
         )
 
@@ -131,7 +138,7 @@ class RAGEvaluator:
                 response = client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
-                    max_completion_tokens=3000 if model == "gpt-5-nano" else 2000,  # ← 수정
+                    max_completion_tokens=self._judge_max_tokens(model),
                     reasoning_effort="low",
                 )
 

@@ -237,6 +237,46 @@ class Retriever:
         sorted_results = sorted(vector_results, key=lambda x: x["hybrid_score"], reverse=True)
         return sorted_results[:k]
 
+    @staticmethod
+    def _source_key(doc: dict) -> str:
+        """문서 출처 식별자 — 같은 RFP 문서 청크를 묶는 데 사용한다."""
+        meta = doc.get("metadata", {})
+        org = meta.get("발주기관", meta.get("발주 기관", ""))
+        biz = meta.get("사업명", meta.get("filename", ""))
+        return f"{org}||{biz}" if (org or biz) else "__unknown__"
+
+    def _limit_per_source(self, results: list[dict], top_k: int) -> list[dict]:
+        """동일 RFP 출처에서 최대 max_per_source개 청크만 허용한다.
+
+        top_k=5 기준으로 한 출처가 3개 이상을 독점하면 다른 관련 문서가 밀려나므로
+        출처당 최대 2개로 제한하되, 단일 출처일 때는 제한 완화(4개까지 허용).
+        """
+        max_per_source = getattr(self.config, "max_chunks_per_source", 2)
+        if max_per_source <= 0:
+            return results[:top_k]
+
+        source_count: dict[str, int] = {}
+        filtered = []
+        for doc in results:
+            key = self._source_key(doc)
+            cnt = source_count.get(key, 0)
+            if cnt < max_per_source:
+                filtered.append(doc)
+                source_count[key] = cnt + 1
+            if len(filtered) >= top_k:
+                break
+
+        # 단일 출처만 남은 경우 제한 완화 (부족 시 원본에서 보충)
+        if len(filtered) < top_k and len(source_count) == 1:
+            existing_texts = {d["text"] for d in filtered}
+            for doc in results:
+                if doc["text"] not in existing_texts:
+                    filtered.append(doc)
+                    if len(filtered) >= top_k:
+                        break
+
+        return filtered
+
     def retrieve(
         self,
         query: str,
@@ -249,16 +289,21 @@ class Retriever:
         method = method or self.config.retrieval_method
         k = top_k or self.config.retrieval_top_k
 
+        # per-source 제한 적용을 위해 충분히 넉넉하게 후보를 가져온다
+        fetch_k = k * 4
+
         if self.config.use_multi_query:
             results = self.multi_query_search(
                 query,
-                top_k=k,
+                top_k=fetch_k,
                 where=where,
                 llm_client=llm_client,
                 base_method=method,
             )
         else:
-            results = self._retrieve_with_method(query, method, k, where)
+            results = self._retrieve_with_method(query, method, fetch_k, where)
+
+        results = self._limit_per_source(results, k)
 
         if self.config.use_reranker:
             results = self.rerank(query, results, top_k=k)
