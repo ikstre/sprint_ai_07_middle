@@ -163,6 +163,7 @@ class RAGEvaluator:
         use_llm_judge: bool,
         use_bertscore: bool,
         keep_memory: bool = False,
+        where: Optional[dict] = None,
     ) -> dict:
         if self.generator is None:
             raise ValueError("generator is not set")
@@ -170,7 +171,7 @@ class RAGEvaluator:
         if not keep_memory:
             self.generator.reset_memory()
 
-        result = self.generator.generate(q_data["question"])
+        result = self.generator.generate(q_data["question"], where=where)
 
         answer = result["answer"]
         retrieved_docs = result["retrieved_docs"]
@@ -238,6 +239,26 @@ class RAGEvaluator:
 
         return entry
 
+    def _extract_org_filter(self, q_data: dict, entry: dict) -> Optional[dict]:
+        """메인 질문의 expected_orgs 또는 retrieved 메타데이터에서 발주기관을 추출한다.
+
+        팔로우업 리트리버의 where 필터로 사용해 같은 문서 안에서만 검색한다.
+        """
+        # 1순위: 평가셋의 expected_orgs
+        orgs = q_data.get("expected_orgs", [])
+        if orgs:
+            return {"발주기관": orgs[0]}
+
+        # 2순위: 직전 generate()가 반환한 retrieved_docs 메타데이터
+        last_result = getattr(self.generator, "_last_retrieved_docs", None)
+        if last_result:
+            for doc in last_result:
+                org = doc.get("metadata", {}).get("발주기관", "")
+                if org:
+                    return {"발주기관": org}
+
+        return None
+
     def run_evaluation_suite(
         self,
         questions: Optional[list[dict]] = None,
@@ -271,13 +292,22 @@ class RAGEvaluator:
                 fu = dict(q_data["follow_up"])
                 fu["id"] = f"{q_data['id']}_followup"
                 fu.setdefault("category", "follow_up")
+                # 팔로우업에 expected_orgs가 없으면 메인 질문의 것을 상속
+                # → retrieval_relevance가 org 매칭으로 hit@5를 올바르게 계산
+                fu.setdefault("expected_orgs", q_data.get("expected_orgs", []))
+                # 메인 질문의 발주기관을 where 필터로 전달 — 팔로우업 리트리버가
+                # 같은 문서 내에서 검색하도록 고정한다
+                fu_where = self._extract_org_filter(q_data, entry)
 
                 print(f"  [follow-up] {fu['question']}")
+                if fu_where:
+                    print(f"    [where] {fu_where}")
                 fu_entry = self._evaluate_one(
                     q_data=fu,
                     use_llm_judge=use_llm_judge,
                     use_bertscore=use_bertscore,
                     keep_memory=True,
+                    where=fu_where,
                 )
                 print(
                     f"    elapsed: {fu_entry['elapsed_time']:.2f}s"
