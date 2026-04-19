@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -126,8 +127,6 @@ def _cleanup_merged_model(model_dir: Path) -> None:
 
     이 세 가지를 제거하면 vLLM이 model.safetensors만 읽고 정상 로드된다.
     """
-    import json
-
     # ── 1. adapter_config.json 제거 (PEFT 모델로 오인식 방지) ─────────
     adapter_config = model_dir / "adapter_config.json"
     if adapter_config.exists():
@@ -434,7 +433,6 @@ def train(args: argparse.Namespace) -> None:
     # tokenizer_config.json vLLM 호환 패치
     _tok_cfg = final_dir / "tokenizer_config.json"
     if _tok_cfg.exists():
-        import json
         _base_tok_cfg = Path(args.model_path) / "tokenizer_config.json"
         _cfg = json.loads(_tok_cfg.read_text(encoding="utf-8"))
         # TokenizersBackend → PreTrainedTokenizerFast
@@ -453,28 +451,26 @@ def train(args: argparse.Namespace) -> None:
         _tok_cfg.write_text(json.dumps(_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 베이스 모델의 processor 파일 복사 (Gemma 등 멀티모달 모델 vLLM 호환)
-    import shutil as _shutil
     _processor_files = ["preprocessor_config.json", "processor_config.json"]
     _base_path = Path(args.model_path)
     for _pf in _processor_files:
         _src = _base_path / _pf
         _dst = final_dir / _pf
         if _src.exists() and not _dst.exists():
-            _shutil.copy2(_src, _dst)
+            shutil.copy2(_src, _dst)
             print(f"  processor 파일 복사: {_pf}")
 
     # 베이스 모델의 *.py 파일 복사 (trust_remote_code 모델 — EXAONE 등)
     for _py_src in _base_path.glob("*.py"):
         _py_dst = final_dir / _py_src.name
         if not _py_dst.exists():
-            _shutil.copy2(_py_src, _py_dst)
+            shutil.copy2(_py_src, _py_dst)
             print(f"  모델 코드 파일 복사: {_py_src.name}")
 
     # Step 3: 체크포인트 삭제 (디스크 절약)
     _ckpt_deleted = 0
     for _ckpt in output_dir.glob("checkpoint-*"):
         if _ckpt.is_dir():
-            import shutil
             shutil.rmtree(_ckpt)
             _ckpt_deleted += 1
     if _ckpt_deleted:
