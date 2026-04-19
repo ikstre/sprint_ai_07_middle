@@ -4,16 +4,44 @@
 .env.*.local
 myenv/
 
-# Raw input data (do not commit)
-data/
+# Raw input data (default: do not commit)
+!data/
+data/*
 !data/.gitkeep
+
+# Selected processed data that may be committed for reproducibility
+!data/data_list_cleaned.csv
+!data/autorag_csv_600/
+!data/autorag_csv_600/corpus.parquet
+!data/autorag_csv_600/qa.parquet
+!data/autorag_csv_800/
+!data/autorag_csv_800/corpus.parquet
+!data/autorag_csv_800/qa.parquet
+!data/autorag_csv_1000/
+!data/autorag_csv_1000/corpus.parquet
+!data/autorag_csv_1000/qa.parquet
+!data/autorag_csv_1200/
+!data/autorag_csv_1200/corpus.parquet
+!data/autorag_csv_1200/qa.parquet
+!data/processed/
+!data/processed/rfp_chunk600_chunks.json
+!data/processed/rfp_chunk800_chunks.json
+!data/processed/rfp_chunk1000_chunks.json
+!data/processed/rfp_chunk1200_chunks.json
 
 # Vector DB / indexes
 chroma_db/
 data/vectordb/
 
-# Evaluation outputs (project-root only)
-/evaluation/
+# Evaluation outputs (default: do not commit)
+!evaluation/
+/evaluation/*
+
+# Final evaluation artifacts that may be committed
+!evaluation/b_chunk600_full_core_v2/
+!evaluation/b_chunk600_full_core_v2/**
+!evaluation/b_chunk800_full_core_v2/
+!evaluation/b_chunk800_full_core_v2/**
 
 # Finetuned model weights (large binary files — use NAS or shared storage)
 models/finetuned/
