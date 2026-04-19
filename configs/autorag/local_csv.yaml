@@ -282,6 +282,7 @@ node_lines:
             temperature: [0.9, 1.0]
             top_k: 64
             top_p: [0.90, 0.95]
-            gpu_memory_utilization: 0.70
-            max_model_len: 16384
+            gpu_memory_utilization: 0.90
+            max_model_len: 8192
+            enforce_eager: true
             kv_cache_dtype: auto
