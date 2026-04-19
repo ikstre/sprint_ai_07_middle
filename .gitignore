@@ -25,7 +25,9 @@ data/*
 !data/autorag_csv_1200/qa.parquet
 !data/processed/
 !data/processed/rfp_chunk600_chunks.json
+!data/processed/rfp_chunk600_a_chunks.json
 !data/processed/rfp_chunk800_chunks.json
+!data/processed/rfp_chunk800_a_chunks.json
 !data/processed/rfp_chunk1000_chunks.json
 !data/processed/rfp_chunk1200_chunks.json
 
