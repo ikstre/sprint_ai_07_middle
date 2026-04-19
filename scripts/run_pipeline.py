@@ -128,7 +128,8 @@ MODEL_REGISTRY: dict[str, dict] = {
             "temperature": [0.9, 1.0],
             "top_k": 64,
             "top_p": [0.90, 0.95],
-            "max_model_len": 16384,
+            "max_model_len": 8192,
+            "gpu_memory_utilization": 0.90,
         },
     },
     # ── 7.8B: QLoRA 필수 (22GB GPU에서 BF16 LoRA 불가) ──────────────────
@@ -138,7 +139,7 @@ MODEL_REGISTRY: dict[str, dict] = {
         "trust_remote_code": True,
         "qlora": True,
         "finetune": {"batch_size": 1, "grad_accum": 16, "lora_r": 8},
-        "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192},
+        "vllm": {"temperature": [0.1, 0.2], "top_p": [0.85, 0.95], "max_model_len": 8192, "gpu_memory_utilization": 0.90},
     },
 }
 
@@ -299,11 +300,14 @@ def _build_pipeline_config(
     finetuned: list[tuple[str, Path]],
     eval_only: list[str],
     output_config_path: Path,
+    strip_base_modules: bool = False,
 ) -> None:
     """
     base config를 로드하고 두 종류의 모델을 generator modules에 추가:
       - finetuned: 파인튜닝 완료 모델 (학습된 경로 사용)
       - eval_only: finetune_capable=False 모델 (원본 경로 그대로 추가)
+      - strip_base_modules: True면 base yaml의 기존 모듈을 제거하고 지정 모델만 포함
+        (gemma4 등 별도 환경 그룹에서 중복 평가 방지용)
     """
     with open(base_config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -318,6 +322,9 @@ def _build_pipeline_config(
 
     if generator_node is None:
         raise ValueError(f"generator node_type을 {base_config_path}에서 찾을 수 없습니다.")
+
+    if strip_base_modules:
+        generator_node["modules"] = []
 
     modules: list[dict] = generator_node.setdefault("modules", [])
 
@@ -370,11 +377,13 @@ def _autorag_run(
     data_dir: Path,
     use_user_site: bool,
     label: str,
+    strip_base_modules: bool = False,
 ) -> None:
     """config 생성 후 AutoRAG 최적화 실행 (단일 그룹)."""
     if finetuned or eval_only:
         print(f"\n[{label}] 파이프라인 config 생성 중...")
-        _build_pipeline_config(base_config, finetuned, eval_only, config_out)
+        _build_pipeline_config(base_config, finetuned, eval_only, config_out,
+                               strip_base_modules=strip_base_modules)
         active_config = config_out
     else:
         active_config = base_config
@@ -507,6 +516,7 @@ def step_autorag(
             data_dir=data_dir,
             use_user_site=True,
             label="Gemma4",
+            strip_base_modules=True,
         )
 
         # ── Group A + B 결과 자동 병합 ──────────────────────────────
@@ -681,6 +691,8 @@ def main() -> None:
                         help="모든 모델에 QLoRA 강제 적용 (기본: 레지스트리 qlora 필드 자동 적용)")
     parser.add_argument("--force-finetune", action="store_true",
                         help="모델이 이미 학습된 경우에도 재학습")
+    parser.add_argument("--force", action="store_true",
+                        help="전체 초기화 후 재실행: 청킹 데이터·파인튜닝 모델·AutoRAG 결과 삭제 후 처음부터 재생성")
 
     # AutoRAG 옵션
     parser.add_argument("--config-path", default="configs/autorag/local_csv.yaml",
@@ -755,6 +767,37 @@ def main() -> None:
     if eval_only_models:
         print(f"평가 전용 모델 ({len(eval_only_models)}종): {', '.join(eval_only_models)}")
 
+    # ── --force: 전체 초기화 ────────────────────────────────────────
+    if args.force:
+        import shutil
+        args.force_data = True
+        args.force_finetune = True
+        _section("--force: 기존 데이터·모델·평가 결과 삭제")
+
+        # 청킹 데이터 삭제 (data/autorag* 하위 parquet)
+        for data_glob in ["data/autorag", "data/autorag_csv_*"]:
+            for data_path in sorted(ROOT.glob(data_glob)):
+                if data_path.is_dir():
+                    shutil.rmtree(data_path)
+                    print(f"  삭제: {data_path.relative_to(ROOT)}")
+
+        # 파인튜닝 결과 삭제
+        finetuned_root = ROOT / "models" / "finetuned"
+        if finetuned_root.exists():
+            for model_dir in sorted(finetuned_root.iterdir()):
+                if model_dir.is_dir():
+                    shutil.rmtree(model_dir)
+                    print(f"  삭제: {model_dir.relative_to(ROOT)}")
+
+        # AutoRAG 평가 결과 삭제 (evaluation/autorag_benchmark*)
+        for eval_glob in ["evaluation/autorag_benchmark*"]:
+            for eval_path in sorted(ROOT.glob(eval_glob)):
+                if eval_path.is_dir():
+                    shutil.rmtree(eval_path)
+                    print(f"  삭제: {eval_path.relative_to(ROOT)}")
+
+        print("  초기화 완료 — 전체 파이프라인을 처음부터 실행합니다.\n")
+
     # ── 청크 크기 목록 결정 ─────────────────────────────────────────
     if args.chunk_sizes.strip():
         chunk_sizes = [int(s.strip()) for s in args.chunk_sizes.split(",") if s.strip()]
@@ -768,19 +811,27 @@ def main() -> None:
     _orig_eval_col      = args.eval_collection  # "" = 자동 유도
 
     # ── 파인튜닝: 청크 크기 무관, 한 번만 실행 ─────────────────────
-    # multi_chunk 시 첫 번째 크기 데이터를 먼저 준비한 뒤 학습
+    # 파인튜닝 전에 첫 번째(또는 유일한) 청크 크기 데이터를 먼저 준비
     finetuned: list[tuple[str, Path]] = []
     if "finetune" in steps:
+        first_size = chunk_sizes[0]
+        args.chunk_size = first_size
         if multi_chunk:
-            first_size = chunk_sizes[0]
-            args.chunk_size = first_size
             args.data_dir = f"data/autorag_csv_{first_size}"
-            if not _orig_eval_col:
-                suffix = "_a" if args.index_scenario == "A" else ""
-                args.eval_collection = f"rfp_chunk{first_size}{suffix}"
-            if "data" in steps:
-                step_data(args)
+        if not _orig_eval_col:
+            suffix = "_a" if args.index_scenario == "A" else ""
+            args.eval_collection = f"rfp_chunk{first_size}{suffix}"
+        if "data" in steps:
+            step_data(args)
         finetuned = step_finetune(args)
+
+    # finetune 단계를 건너뛴 경우, 디스크에서 완료된 모델을 자동 감지 (루프 전 1회)
+    if "autorag" in steps and not finetuned and finetune_models:
+        for name in finetune_models:
+            final_dir = ROOT / "models/finetuned" / name / "final"
+            if final_dir.exists():
+                finetuned.append((name, final_dir))
+                print(f"  [자동 감지] 기학습 모델: {name} → {final_dir}")
 
     # ── 청크 크기별 반복 실행 ────────────────────────────────────────
     for size in chunk_sizes:

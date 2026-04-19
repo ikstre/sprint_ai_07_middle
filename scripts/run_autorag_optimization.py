@@ -36,11 +36,7 @@ load_dotenv()
 
 
 def _patch_transformers_validation() -> None:
-    """vLLM config 로드 시 transformers 5.x strict 검증 우회 (kanana 등).
-
-    finetune_local.py와 동일한 패치. vLLM이 내부적으로
-    AutoConfig.from_pretrained()를 호출할 경우 대비.
-    """
+    """vLLM config 로드 시 transformers 5.x strict 검증 우회 (kanana 등)."""
     try:
         from transformers.models.llama.configuration_llama import LlamaConfig
         if hasattr(LlamaConfig, "__class_validators__"):
@@ -52,7 +48,23 @@ def _patch_transformers_validation() -> None:
         pass
 
 
+def _patch_rope_parameters() -> None:
+    """transformers 4.x 환경에서 EXAONE 등 5.x 전용 RopeParameters 임포트 오류 방지.
+
+    configuration_exaone.py가 타입 힌트용으로만 사용하므로 더미 클래스로 대체해도 무해.
+    """
+    try:
+        import transformers.modeling_rope_utils as _rope_utils
+        if not hasattr(_rope_utils, "RopeParameters"):
+            class RopeParameters:
+                pass
+            _rope_utils.RopeParameters = RopeParameters
+    except Exception:
+        pass
+
+
 _patch_transformers_validation()
+_patch_rope_parameters()
 
 _AUTORAG_PYTHON = os.getenv("AUTORAG_PYTHON", "")
 if _AUTORAG_PYTHON and Path(_AUTORAG_PYTHON).exists() and \
