@@ -431,14 +431,23 @@ def train(args: argparse.Namespace) -> None:
     print("\n저장 후처리 (vLLM 호환성 보장)...")
     _cleanup_merged_model(final_dir)
 
-    # trust_remote_code 모델은 custom *.py 파일이 로컬에 있어야 vLLM이 로드 가능.
-    # save_pretrained()가 이 파일들을 복사하지 않으므로 베이스 모델에서 직접 복사.
+    # save_pretrained()가 복사하지 않는 베이스 모델 설정 파일을 final/에 보완 복사.
+    # - *.py: trust_remote_code 모델 아키텍처 코드 (exaone 등)
+    # - preprocessor_config.json: 멀티모달 이미지 프로세서 (gemma3 등)
+    # - *.model / sentencepiece 등 기타 프로세서 파일
+    # 가중치(*.safetensors, *.bin)와 이미 존재하는 파일은 건너뜀.
     import shutil as _shutil
-    _base_py_files = list(Path(args.model_path).glob("*.py"))
-    if _base_py_files:
-        for _py in _base_py_files:
-            _shutil.copy2(_py, final_dir / _py.name)
-        print(f"  custom 코드 {len(_base_py_files)}개 복사: {[f.name for f in _base_py_files]}")
+    _WEIGHT_SUFFIXES = {".safetensors", ".bin", ".pt", ".ckpt"}
+    _copied = []
+    for _src in Path(args.model_path).iterdir():
+        if _src.suffix in _WEIGHT_SUFFIXES or not _src.is_file():
+            continue
+        _dst = final_dir / _src.name
+        if not _dst.exists():
+            _shutil.copy2(_src, _dst)
+            _copied.append(_src.name)
+    if _copied:
+        print(f"  베이스 모델 설정 파일 {len(_copied)}개 보완 복사: {_copied}")
 
     # Step 3: 체크포인트 삭제 (디스크 절약)
     _ckpt_deleted = 0
