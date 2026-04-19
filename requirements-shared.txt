@@ -1,7 +1,0 @@
-# Shared environment alias.
-#
-# 팀에서 "공용환경"이라는 이름으로 설치할 때 사용:
-#   pip install -r requirements-shared.txt
-#
-# 실제 의존성 정의는 requirements.txt에 유지한다.
--r requirements.txt

@@ -14,9 +14,7 @@
 - `scripts/check_release_gate.py`: `core` 평가 + 게이트 판정을 단일 커맨드로 실행.
 - `scripts/prepare_autorag_data.py`: AutoRAG용 `qa.parquet`, `corpus.parquet` 생성.
 - `scripts/run_autorag_optimization.py`: AutoRAG 탐색/최적화 실행. ChromaDB 패치 + VRAM 해제 패치 내장.
-- `scripts/download_models.py`: 생성 모델(Gemma4-E4B) + 임베딩 3종 다운로드. 재개(resume) 가능.
-- `scripts/run_gemma4_optimization.sh`: Gemma4-E4B 전용 AutoRAG 실행 (user-local transformers 5.x + vLLM).
-- `scripts/merge_gemma4_results.py`: Gemma4 별도 실행 결과를 메인 trial에 병합. is_best 재계산.
+- `scripts/download_models.py`: 생성 모델(Gemma4-E4B 포함) + 임베딩 모델 다운로드.
 - `scripts/finetune_local.py`: 로컬 모델 LoRA/QLoRA 파인튜닝 (peft + trl SFTTrainer).
 - `scripts/finetune_openai.py`: OpenAI Fine-tuning API 래퍼 (start / status / list 서브커맨드).
 
@@ -52,8 +50,11 @@
   - `reasoning_effort`: low / medium / high (gpt-5 계열 추론 깊이)
   - `auto_model_routing`: 쿼리 복잡도 기반 모델 자동 선택 (bool)
   - `routing_simple_model`: 단순 질문용 경량 모델 (gpt-5-nano)
-  - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (50)
-  - `max_tokens`: 16000 (reasoning 토큰 포함 충분히 확보)
+  - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (80)
+  - `max_tokens`: 3500
+  - `retrieval_method`: `hybrid` (기본값)
+  - `conversation_memory_k`: 3
+  - `max_context_chars_per_doc`: 800
 - **Scenario A 전용**
   - `hf_embedding_model`: `paths.EMBEDDING_MODEL_PATH` 기본값 (`.env`의 `EMBEDDING_MODEL_PATH` → `{MODEL_DIR}/embeddings/BGE-m3-ko`)
   - `hf_embedding_dim`: 1024 (BGE-m3-ko) / 768 (ko-sroberta)
@@ -164,17 +165,12 @@ AutoRAG 최적화 실행 + 세 가지 내장 패치:
 |------|---------|---------|--------|-----|
 | `tutorial.yaml` | B (OpenAI) | 서버/PC | text-embedding-3-small | gpt-5-mini |
 | `local.yaml` | A (로컬, 서버) | GCP GPU 22GB (L4) | 5종 (BGE/sroberta/E5/SimCSE/DeBERTa) | 5종 vLLM |
-| `local_gemma4.yaml` | A (서버, Gemma4 전용) | GCP GPU 22GB (L4) | 5종 동일 | Gemma4-E4B |
 | `local_pc.yaml` | A-PC (로컬, PC) | RTX 4070/3060Ti 8GB | BAAI/bge-m3 + ko-sroberta (HF Hub) | 4종 vLLM |
 
 `local.yaml` 특이 설정:
 - `gpu_memory_utilization: 0.70` (22GB GPU)
 - `kv_cache_dtype: auto` → 모델 dtype(bfloat16) 자동 사용
 - `max_model_len: 16384` — Gemma3-4B에 적용 (131072 기본값 대비 축소, KV 캐시 초과 방지)
-
-`local_gemma4.yaml` 특이 설정:
-- `gpu_memory_utilization: 0.85`, `max_model_len: 16384`
-- user-local transformers 5.x + vLLM 필요 → `bash scripts/run_gemma4_optimization.sh`
 
 `local_pc.yaml` 특이 설정:
 - `gpu_memory_utilization: 0.80` (8GB × 0.80 = 6.4GB)
@@ -302,8 +298,8 @@ OpenAI Fine-tuning API 래퍼.
 - 평가 지표 추가: `src/evaluation/*` 모듈 추가 후 `summary_report`와 CLI 출력 반영
 - 새 문서 포맷 추가: `src/document_loader.py`의 `load_single()` 및 `load_all()`의 확장자 분기 확장
 - AutoRAG 새 모델 추가: `configs/autorag/local.yaml` 또는 `local_pc.yaml`의 `generator.modules`에 vllm 블록 추가
-- AutoRAG Gemma4 모델 변경: `configs/autorag/local_gemma4.yaml` 수정 후 `bash scripts/run_gemma4_optimization.sh`
-- AutoRAG 새 임베딩 추가: `configs/autorag/local.yaml`과 `local_gemma4.yaml` 양쪽의 `vectordb` + `semantic_retrieval.modules`에 추가, `scripts/download_models.py`에 다운로드 항목 추가
+- AutoRAG Gemma4 모델 변경: `configs/autorag/local.yaml`의 Gemma4 관련 설정과 `run_pipeline.py`의 Gemma4 그룹 로직을 함께 점검
+- AutoRAG 새 임베딩 추가: `configs/autorag/local.yaml`의 `vectordb` + `semantic_retrieval.modules`에 추가, `scripts/download_models.py`에 다운로드 항목 추가
 - AutoRAG ChromaDB 관련 오류: `scripts/run_autorag_optimization.py`의 패치 함수 확인
 - 서버 경로 변경: `.env`의 `SRV_DATA_DIR` 수정 → `configs/paths.py`가 모든 하위 경로 자동 파생
 - 모델 경로만 변경: `.env`의 `MODEL_DIR` 또는 개별 `CHAT_MODEL_PATH`/`EMBEDDING_MODEL_PATH` 수정

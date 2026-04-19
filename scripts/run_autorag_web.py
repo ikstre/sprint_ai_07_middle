@@ -26,7 +26,7 @@ try:
     import autorag  # noqa: F401
 except ImportError:
     print(f"[AutoRAG] 미설치. 현재 인터프리터: {sys.executable}")
-    print("설치 방법: pip install -r requirements-autorag.txt")
+    print("설치 방법: pip install -r requirements-gemma4.txt")
     sys.exit(1)
 
 
@@ -42,4 +42,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

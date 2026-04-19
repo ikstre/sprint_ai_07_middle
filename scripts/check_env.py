@@ -45,20 +45,18 @@ def check_env_vars() -> bool:
 
 
 def check_dual_env_layout() -> bool:
-    print("\n[2] A안 2환경 구성")
+    print("\n[2] 통합/Gemma4 2환경 구성")
 
-    shared_req = Path("requirements-shared.txt")
-    user_req = Path("requirements-user.txt")
-    autorag_req = Path("requirements-autorag.txt")
+    integrated_req = Path("requirements-integrated.txt")
+    gemma4_req = Path("requirements-gemma4.txt")
     autorag_python = os.getenv("AUTORAG_PYTHON", "")
 
-    print(f"  shared requirements : {'있음' if shared_req.exists() else '없음'} ({shared_req})")
-    print(f"  user requirements   : {'있음' if user_req.exists() else '없음'} ({user_req})")
-    print(f"  autorag requirements: {'있음' if autorag_req.exists() else '없음'} ({autorag_req})")
+    print(f"  integrated reqs     : {'있음' if integrated_req.exists() else '없음'} ({integrated_req})")
+    print(f"  gemma4 reqs         : {'있음' if gemma4_req.exists() else '없음'} ({gemma4_req})")
 
-    ok = shared_req.exists() and user_req.exists() and autorag_req.exists()
+    ok = integrated_req.exists() and gemma4_req.exists()
     if not autorag_python:
-        print("  [WARN] AUTORAG_PYTHON 미설정 — A안 AutoRAG는 별도 user env 연결이 필요")
+        print("  [WARN] AUTORAG_PYTHON 미설정 — Gemma4 전용 유저 환경 연결이 필요")
         return False
 
     p = Path(autorag_python)
@@ -69,8 +67,8 @@ def check_dual_env_layout() -> bool:
     current = Path(sys.executable).resolve()
     resolved = p.resolve()
     if resolved == current:
-        print(f"  [WARN] AUTORAG_PYTHON이 현재 공용환경과 동일함: {resolved}")
-        print("         A안 AutoRAG는 shared env와 분리된 user env 파이썬을 지정해야 함")
+        print(f"  [WARN] AUTORAG_PYTHON이 현재 통합환경과 동일함: {resolved}")
+        print("         Gemma4 전용 유저 환경 파이썬을 별도로 지정해야 함")
         return False
 
     print(f"  AUTORAG_PYTHON      : {p}")
@@ -155,7 +153,7 @@ def main() -> None:
 
     results = {
         "환경 변수": check_env_vars(),
-        "A안 2환경": check_dual_env_layout(),
+        "2환경 구성": check_dual_env_layout(),
         "OpenAI 연결": check_openai(),
         "데이터 경로": check_data_dirs(),
         "패키지": check_packages(),

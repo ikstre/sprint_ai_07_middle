@@ -35,7 +35,7 @@
 #   - gpu_memory_utilization: 0.70 → 15.4GB 예약 (22GB GPU 기준)
 #   - max_model_len 미지정 → 각 모델의 max_position_embeddings 자동 사용
 #   - kv_cache_dtype: auto → 모델 dtype(bfloat16) 자동 사용
-#   - Gemma4-E4B: 15GB BF16, user-local transformers 5.x + vLLM 필요 (별도 실행)
+#   - Gemma4-E4B: 15GB BF16, Gemma4 전용 유저 환경에서 run_pipeline.py 경로로 실행
 #   - 각 모델 평가 후 VRAM 자동 해제 (run_autorag_optimization.py 패치)
 #   - kanana/midm (llama 계열): trust_remote_code 불필요
 #   - EXAONE: trust_remote_code: true 필요
@@ -235,10 +235,6 @@ node_lines:
             max_model_len: 16384
             kv_cache_dtype: auto
 
-          # ── Gemma4-E4B: 별도 실행 후 merge ──────────────────────────
-          # transformers 5.x + user-local vLLM 필요 (Gemma4 아키텍처 등록됨)
+          # ── Gemma4-E4B ───────────────────────────────────────────────
+          # Gemma4 전용 유저 환경 + run_pipeline.py Gemma4 그룹 경로 사용
           # BF16 ~15GB, dense 모델 (MoE 없음)
-          # 실행: bash scripts/run_gemma4_optimization.sh
-          # 합치기: python scripts/merge_gemma4_results.py \
-          #           --main-dir evaluation/autorag_benchmark_local \
-          #           --gemma4-dir evaluation/autorag_benchmark_gemma4

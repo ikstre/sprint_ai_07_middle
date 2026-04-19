@@ -1,21 +1,21 @@
 # ============================================================
-# 유저 실행환경(user env) 의존성 (Scenario A AutoRAG 전용)
+# Gemma4 전용 유저환경(user env) 의존성
 #
 # 역할:
-#   - A안 AutoRAG 최적화 / dashboard / api / web
-#   - shared env와 분리된 사용자별 실험 환경
+#   - Gemma4 기반 AutoRAG 최적화 / dashboard / api / web
+#   - integrated env와 분리된 사용자별 실험 환경
 #
 # 설치 예:
-#   conda create -n autorag python=3.11
-#   conda activate autorag
-#   pip install -r requirements-autorag.txt
+#   conda create -n gemma4_env python=3.11
+#   conda activate gemma4_env
+#   pip install -r requirements-gemma4.txt
 #
 # 연동:
-#   export AUTORAG_PYTHON=/path/to/envs/autorag/bin/python
+#   export AUTORAG_PYTHON=/path/to/envs/gemma4_env/bin/python
 #   python scripts/run_autorag_optimization.py ...
 # ============================================================
 
-# user env 전용 AutoRAG 런타임
+# gemma4 user env 전용 AutoRAG 런타임
 AutoRAG==0.3.22
 langchain-community>=0.4.0
 langchain-text-splitters>=1.1.1
