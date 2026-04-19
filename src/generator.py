@@ -245,14 +245,19 @@ class RAGGenerator:
         model = self._route_model(query or user_prompt)
 
         effort = getattr(self.config, "reasoning_effort", "medium")
+        # gpt-5 계열(reasoning 모델)만 reasoning_effort 지원; 나머지는 생략
+        is_reasoning_model = model.startswith(("gpt-5", "o1", "o3", "o4"))
+        extra_kwargs: dict = {}
+        if is_reasoning_model:
+            extra_kwargs["reasoning_effort"] = effort
 
         if stream:
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 max_completion_tokens=self.config.max_tokens,
-                reasoning_effort=effort,
                 stream=True,
+                **extra_kwargs,
             )
             chunks = []
             for chunk in response:
@@ -265,7 +270,7 @@ class RAGGenerator:
             model=model,
             messages=messages,
             max_completion_tokens=self.config.max_tokens,
-            reasoning_effort=effort,
+            **extra_kwargs,
         )
 
         usage = None

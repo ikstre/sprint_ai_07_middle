@@ -41,8 +41,10 @@ with st.sidebar:
 
     if scenario_key == "B":
         _collections = [
-            "rfp_chunk600",      # CSV 기반 정제 데이터, 600자 (권장)
-            "rfp_chunk1200",     # HWP 원문 추출, 1200자
+            "rfp_chunk600",
+            "rfp_chunk800",
+            "rfp_chunk1000",
+            "rfp_chunk1200",
         ]
     else:
         _collections = [
@@ -62,7 +64,7 @@ with st.sidebar:
     if scenario_key == "B":
         model = st.selectbox(
             "LLM 모델",
-            ["gpt-4o-mini", "gpt-4o-mini", "gpt-4o"],
+            ["gpt-5-mini", "gpt-5-nano", "gpt-5"],
             index=0,
         )
         temperature = 0.1       # gpt-5 미지원, 내부적으로만 유지

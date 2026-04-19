@@ -69,6 +69,7 @@ class Config:
     retrieval_top_k: int = 5
     retrieval_method: Literal["similarity", "mmr", "hybrid"] = "similarity"
     mmr_lambda: float = 0.5           # MMR 다양성 파라미터
+    max_chunks_per_source: int = 2    # 동일 출처(발주기관+사업명) 청크 최대 개수
     use_reranker: bool = False
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     use_multi_query: bool = False
