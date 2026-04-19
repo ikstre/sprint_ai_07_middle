@@ -18,6 +18,10 @@ data/vectordb/
 # Finetuned model weights (large binary files — use NAS or shared storage)
 models/finetuned/
 
+# AutoRAG 파이프라인 자동 생성 config (경로 치환된 임시 파일)
+configs/autorag/local_csv_pipeline.yaml
+configs/autorag/local_csv_pipeline_gemma.yaml
+
 # Local shared data (models, datasets — use NAS or shared storage)
 shared_data/
 
