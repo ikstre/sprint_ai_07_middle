@@ -1,0 +1,7 @@
+# User environment alias for Scenario A AutoRAG runtime.
+#
+# 팀에서 "유저환경"이라는 이름으로 설치할 때 사용:
+#   pip install -r requirements-user.txt
+#
+# 실제 의존성 정의는 requirements-autorag.txt에 유지한다.
+-r requirements-autorag.txt

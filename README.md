@@ -42,13 +42,27 @@ sprint_ai_07_middle/
 ## 설치
 
 ```bash
-pip install -r requirements.txt
+# 공용환경(shared env): B안 실행/평가 + A안 공통 작업
+pip install -r requirements-shared.txt
 
-# AutoRAG (의존성 충돌로 별도 권장)
-pip install -r requirements-autorag.txt
+# 유저환경(user env): A안 AutoRAG 전용
+pip install -r requirements-user.txt
 
 # BM25 ko_okt 토크나이저 (Java 필요)
 sudo apt-get install -y default-jdk
+```
+
+권장 환경 분리:
+
+```bash
+# 1) shared env
+conda activate sprint_env
+pip install -r requirements-shared.txt
+
+# 2) user env (A안 AutoRAG 전용)
+conda create -n autorag python=3.11
+conda activate autorag
+pip install -r requirements-user.txt
 ```
 
 `.env` 설정:
@@ -56,9 +70,14 @@ sudo apt-get install -y default-jdk
 ```bash
 OPENAI_API_KEY=sk-...
 HF_TOKEN=hf_...
+AUTORAG_PYTHON=/path/to/envs/autorag/bin/python
 # 서버 경로 (기본: /srv/shared_data)
 # SRV_DATA_DIR=/srv/shared_data
 ```
+
+- `shared env`는 `B안` 실행/평가와 `A안`의 인덱싱·파인튜닝 같은 공통 작업에 사용합니다.
+- `user env`는 `AutoRAG`만 담당합니다. `scripts/run_autorag_optimization.py`, `scripts/run_autorag_api.py`, `scripts/run_autorag_web.py`는 `AUTORAG_PYTHON`이 설정돼 있으면 해당 인터프리터로 자동 전환합니다.
+- `requirements.txt` / `requirements-autorag.txt`는 실제 의존성 파일이고, `requirements-shared.txt` / `requirements-user.txt`는 역할별 진입점입니다.
 
 ---
 
