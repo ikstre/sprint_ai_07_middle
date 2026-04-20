@@ -19,7 +19,8 @@ class Config:
     scenario: Literal["A", "B"] = "B"  # "A": HuggingFace 로컬, "B": OpenAI API
 
     # ── 데이터 경로 ────────────────────────────────────────────────
-    documents_dir: str = "data/documents"
+    # 파일 기반 로딩 기본 경로. 현재 프로젝트 원본 PDF/HWP는 data/ 아래에 둔다.
+    documents_dir: str = "data"
     processed_dir: str = field(default_factory=lambda: paths.PROCESSED_DIR)
     metadata_csv: str = field(default_factory=lambda: paths.METADATA_CSV)
     vectordb_dir: str = field(default_factory=lambda: paths.VECTORDB_DIR)
