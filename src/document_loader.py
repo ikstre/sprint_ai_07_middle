@@ -12,6 +12,39 @@ from typing import Optional
 import pandas as pd
 
 
+_META_KEY_ALIASES = {
+    "발주기관": "발주기관",
+    "발주 기관": "발주기관",
+    "발주처": "발주기관",
+    "기관명": "발주기관",
+    "사업명": "사업명",
+    "사업명칭": "사업명",
+    "사업금액": "사업금액",
+    "사업 금액": "사업금액",
+    "공고번호": "공고번호",
+    "공고 번호": "공고번호",
+    "공고차수": "공고차수",
+    "공고 차수": "공고차수",
+    "공개일자": "공개일자",
+    "공개 일자": "공개일자",
+    "입찰참여시작일": "입찰참여시작일",
+    "입찰 참여 시작일": "입찰참여시작일",
+    "입찰참여마감일": "입찰참여마감일",
+    "입찰 참여 마감일": "입찰참여마감일",
+    "사업요약": "사업요약",
+    "사업 요약": "사업요약",
+}
+
+
+def _normalize_meta_keys(meta: dict) -> dict:
+    """CSV 컬럼명처럼 공백이 섞인 메타데이터 키를 canonical 형태로 통일한다."""
+    normalized: dict = {}
+    for key, value in meta.items():
+        canonical = _META_KEY_ALIASES.get(str(key), str(key))
+        normalized[canonical] = value
+    return normalized
+
+
 def _extract_text_from_hwp(file_path: str) -> str:
     """olefile을 사용하여 HWP 파일에서 텍스트를 추출한다."""
     try:
@@ -197,8 +230,9 @@ def filter_stage3(text: str) -> str:
         if re.fullmatch(r"(\d+(\.\d+)*\.?)|(\(\d+\))|([①-⑳])|([ivxlcdmIVXLCDM]+)", line):
             continue
 
-        # 목차성 점선 줄 제거
-        if re.search(r"\.{3,}", line):
+        # 목차성 점선 줄 제거: 4개 이상 연속된 점이 줄 끝(선택적 페이지 번호 포함)에 있을 때만
+        # 본문 중 말줄임표(…/...)가 있는 줄이 통째로 버려지는 것을 방지한다.
+        if re.search(r"\.{4,}\s*\d*\s*$", line):
             continue
 
         # 메타데이터성 줄 제거
@@ -269,7 +303,7 @@ class DocumentLoader:
                             break
             if not matched.empty:
                 row = matched.iloc[0].to_dict()
-                meta.update(row)
+                meta.update(_normalize_meta_keys(row))
 
         return {"text": text, "metadata": meta}
 
@@ -302,11 +336,11 @@ class DocumentLoader:
             text = clean_text(text)
             text = apply_filter(text)
 
-            meta = {c: row.get(c, "") for c in meta_cols}
+            raw_meta = {c: row.get(c, "") for c in meta_cols}
+            meta = _normalize_meta_keys(raw_meta)
             filename_hint = str(row.get("파일명", row.get("사업명", f"row_{idx}")))
             meta["filename"] = filename_hint
             meta["file_path"] = filename_hint
-            meta["발주 기관"] = meta.get("발주 기관", meta.get("발주기관", ""))
 
             documents.append({"text": text, "metadata": meta})
             print(f"  ✓ 로드 완료: {filename_hint[:60]} ({len(text)} chars)")
