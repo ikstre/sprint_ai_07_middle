@@ -454,11 +454,13 @@ class RAGGenerator:
         messages.extend(self.memory.get_messages())
         messages.append({"role": "user", "content": user_prompt})
 
-        input_ids = tokenizer.apply_chat_template(
+        _tmpl = tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
             return_tensors="pt",
-        ).to(model.device)
+        )
+        # transformers 버전에 따라 Tensor 또는 BatchEncoding 반환
+        input_ids = (_tmpl.input_ids if hasattr(_tmpl, "input_ids") else _tmpl).to(model.device)
 
         with torch.no_grad():
             outputs = model.generate(
