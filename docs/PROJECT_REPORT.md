@@ -143,15 +143,11 @@
 
 > Gemma4 확장 trial은 GPU 메모리 제약으로 별도 환경에서 실행 후 `scripts/merge_gemma4_results.py`로 메인 trial에 병합.
 
-### 4.4 카테고리별 성능 (chunk800 similarity_k5)
+### 4.4 카테고리별 성능
 
-| 카테고리 | count | hit@5 | nDCG@5 | field_cov | grounded |
-|---|---:|---:|---:|---:|---:|
-| single_doc | 100 | 0.90 | 0.824 | 0.551 | 0.441 |
-| follow_up | 100 | 0.86 | 0.856 | — | 0.782 |
-
-- `follow_up` 질문에서 `grounded_token_ratio`가 크게 상승 — 팔로우업이 메인 질문 컨텍스트를 재활용하기 때문
-- `single_doc`의 grounded가 낮은 이유: LLM이 문서 외 일반 지식을 혼입하는 경향
+- 카테고리별 세부 표는 최신 재생성 코퍼스 기준으로 다시 산출하지 않았으므로 본 보고서에서는 제외합니다.
+- 현재 최신 해석은 전체 core 재평가 결과(`evaluation/b_chunk*_full_core`)를 기준으로 합니다.
+- 후속 분석이 필요하면 동일 코퍼스/인덱스 기준으로 `single_doc`, `follow_up`, `out_of_scope`를 다시 분리 집계해야 합니다.
 
 ---
 

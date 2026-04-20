@@ -433,7 +433,7 @@ python scripts/check_release_gate.py
 
 ### B안 — top-k 검색 결과에 여러 RFP 문서 혼합
 - 동일 출처(발주기관+사업명) 청크를 최대 2개로 제한하는 `max_chunks_per_source` 옵션이 기본 적용됩니다.
-- 최신 재평가 기준 운영 기본값은 `rfp_chunk800`입니다. 필요 시 `rfp_chunk1000`, `rfp_chunk1200`도 비교 후보로 사용할 수 있습니다.
+- 최신 재평가 기준에서는 4개 chunk 모두 품질 지표는 기준 이상이었지만 시간 gate는 미통과였습니다. 따라서 현재는 특정 chunk를 운영 기본값으로 확정하지 않고, `rfp_chunk800`, `rfp_chunk1000`, `rfp_chunk1200`을 비교 후보로 유지하는 것이 적절합니다.
 
 ### B안 — LLM judge 응답 없음 또는 JSON 파싱 실패
 - gpt-5-nano는 내부 추론 예산이 필요해 `max_completion_tokens=4000`으로 자동 설정됩니다.
