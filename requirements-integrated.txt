@@ -1,0 +1,76 @@
+# ============================================================
+# 통합 실행환경(integrated env) 의존성
+#
+# 역할:
+#   - B안(OpenAI 서비스형 RAG) 실행/평가
+#   - A안 공통 단계(인덱싱, 파인튜닝, 앱 실행)
+#   - 프로젝트 기본 개발 환경
+#
+# 권장:
+#   conda activate sprint_env
+#   pip install -r requirements-integrated.txt
+#
+# 참고:
+#   - Gemma4 기반 AutoRAG 최적화는 별도 유저환경(gemma4 env)에서 실행
+#     → requirements-gemma4.txt + AUTORAG_PYTHON 사용
+# ============================================================
+
+# ── Core ──────────────────────────────────────────────────────
+openai>=2.30.0
+python-dotenv>=1.0.0
+
+# ── LangChain ─────────────────────────────────────────────────
+langchain>=1.2.0
+langchain-community>=0.4.0
+langchain-text-splitters>=1.1.1
+
+# ── Document Parsing ──────────────────────────────────────────
+pypdf>=4.0.0
+pdfplumber>=0.11.0
+olefile>=0.47
+python-docx>=1.0.0
+
+# ── Embedding & Vector DB ─────────────────────────────────────
+chromadb>=1.5.0
+faiss-cpu>=1.8.0
+
+# ── HuggingFace (시나리오 A) ───────────────────────────────────
+transformers>=5.0.0
+sentence-transformers>=5.0.0
+huggingface_hub>=1.9.0
+torch>=2.10.0
+accelerate>=1.0.0
+peft>=0.18.0
+trl>=1.1.0
+# 4-bit 양자화 (hf_load_in_4bit=True 사용 시, CUDA Linux 환경만 지원)
+bitsandbytes>=0.43.0; sys_platform == "linux"
+
+# ── Reranking (시나리오 A) ─────────────────────────────────────
+# Python 3.14에서는 ir-datasets(zlib-state) C++ 빌드 실패 → 제외
+FlagEmbedding>=1.2.0; python_version < "3.14"
+
+# ── Data Processing ───────────────────────────────────────────
+pandas>=2.2.0
+numpy>=2.0.0
+pyarrow>=16.0.0
+
+# ── Evaluation ────────────────────────────────────────────────
+rouge-score>=0.1.2
+nltk>=3.9.0
+bert-score>=0.3.13
+evaluate>=0.4.0
+
+# Python 3.14에서는 scikit-network C++ 빌드 실패 → 제외
+ragas>=0.4.3; python_version < "3.14"
+
+# ── Streamlit App ─────────────────────────────────────────────
+streamlit>=1.30.0
+
+# ── API Serving ───────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn>=0.30.0
+
+# ── Notebook & Utils ──────────────────────────────────────────
+jupyter>=1.0.0
+ipywidgets>=8.1.0
+tqdm>=4.66.0

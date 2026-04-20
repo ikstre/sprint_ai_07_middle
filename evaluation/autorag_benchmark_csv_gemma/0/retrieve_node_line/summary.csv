@@ -1,0 +1,4 @@
+node_type,best_module_filename,best_module_name,best_module_params,best_execution_time
+lexical_retrieval,10.parquet,BM25,"{'bm25_tokenizer': 'ko_okt', 'top_k': 1}",0.0118751039084591
+semantic_retrieval,0.parquet,VectorDB,"{'vectordb': 'local_bge', 'top_k': 1}",0.2540510165442446
+hybrid_retrieval,0.parquet,HybridRRF,"{'top_k': 8, 'weight': 4.0}",0.3724355338067853
