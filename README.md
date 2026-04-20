@@ -9,6 +9,8 @@
 
 - Notion: https://www.notion.so/AI-7-1-3347356fc5cb8199b3b1c1c83dd1467b?source=copy_link
 
+## 보고서
+- https://docs.google.com/document/d/15H3Q0T4jU-t6NuFbrVIMGQ_FbmLBk38U/edit?usp=sharing&ouid=107156597373944303905&rtpof=true&sd=true
 ---
 
 ## 디렉토리 구조
