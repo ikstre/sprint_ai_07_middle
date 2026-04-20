@@ -27,7 +27,7 @@ sprint_ai_07_middle/
 │   ├── run_autorag_optimization.py # AutoRAG 평가 실행
 │   ├── finetune_local.py           # LoRA/QLoRA 파인튜닝
 │   ├── finetune_openai.py          # OpenAI Fine-tuning API
-│   ├── run_evaluation.py           # 서비스 평가 (B안)
+│   ├── run_evaluation.py           # 질문지 기반 서비스 평가 (A/B안, Chroma 컬렉션 대상)
 │   ├── check_release_gate.py       # 릴리즈 게이트
 │   ├── download_models.py          # 모델 다운로드
 │   ├── repair_finetuned_models.py  # 파인튜닝 모델 복구
@@ -267,12 +267,21 @@ streamlit run app.py
 ```bash
 # core 지표 평가 (hit@5, nDCG@5, grounded ratio 등)
 python scripts/run_evaluation.py \
+  --scenario B \
   --mode core \
   --collection rfp_chunk600 \
   --output-dir evaluation
 
+# Scenario A core 평가
+python scripts/run_evaluation.py \
+  --scenario A \
+  --mode core \
+  --collection rfp_chunk600_a \
+  --output-dir evaluation/a_chunk600_core
+
 # LLM judge 포함 상세 평가
 python scripts/run_evaluation.py \
+  --scenario B \
   --mode detailed \
   --judge on \
   --collection rfp_chunk600 \
@@ -281,6 +290,12 @@ python scripts/run_evaluation.py \
 # 릴리즈 게이트 확인
 python scripts/check_release_gate.py
 ```
+
+주의:
+- `run_evaluation.py`는 Chroma 컬렉션을 대상으로 하는 질문지 기반 서비스 평가입니다.
+- 저장소에 커밋된 `evaluation/autorag_benchmark_csv`, `evaluation/autorag_benchmark_csv_gemma` 는 A안 AutoRAG 벤치마크 결과이며, `run_evaluation.py`의 출력이 아닙니다.
+- 현재 저장소에 가공 청크가 포함된 A안 기준 산출물은 `rfp_chunk600_a`, `rfp_chunk800_a` 계열이므로, A안 질문지 평가는 이 컬렉션들부터 사용하는 것이 안전합니다.
+- A안에서 `--mode detailed` 또는 `--judge on`을 쓰면 judge 단계는 여전히 OpenAI API를 사용합니다.
 
 ---
 

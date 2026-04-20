@@ -6,7 +6,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +69,7 @@ def run_single_config(
     use_llm_judge: bool = True,
     use_bertscore: bool = False,
     collection_name: str = "rfp_chunk600",
+    skip_keys: set | None = None,
 ):
     print(f"\n{'=' * 56}")
     print(f"config: {label}")
@@ -86,6 +90,8 @@ def run_single_config(
     df.to_csv(output_dir / f"eval_{label}.csv", index=False, encoding="utf-8-sig")
 
     summary = evaluator.summary_report(df)
+    if skip_keys:
+        summary = {k: v for k, v in summary.items() if k not in skip_keys}
     with open(output_dir / f"summary_{label}.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -191,6 +197,100 @@ def load_gate_thresholds(path: Optional[str]) -> dict:
         return json.load(f)
 
 
+def resolve_default_collection(scenario: str, collection: str) -> str:
+    if collection:
+        return collection
+    return "rfp_chunk600_a" if scenario == "A" else "rfp_chunk600"
+
+
+def parse_chunk_sizes(raw: str) -> list[int]:
+    if not raw.strip():
+        return []
+    return [int(part.strip()) for part in raw.split(",") if part.strip()]
+
+
+def derive_collection_for_size(scenario: str, chunk_size: int) -> str:
+    suffix = "_a" if scenario == "A" else ""
+    return f"rfp_chunk{chunk_size}{suffix}"
+
+
+def derive_output_dir_for_size(base_output_dir: Path, scenario: str, chunk_size: int, mode: str, test_limit: int) -> Path:
+    prefix = scenario.lower()
+    scope = "smoke" if test_limit else "full"
+    return base_output_dir / f"{prefix}_chunk{chunk_size}_{scope}_{mode}"
+
+
+def build_child_command(args: argparse.Namespace, chunk_size: int, output_dir: Path) -> list[str]:
+    command = [
+        sys.executable,
+        "-u",
+        str(Path(__file__).resolve()),
+        "--scenario", args.scenario,
+        "--mode", args.mode,
+        "--judge", args.judge,
+        "--bertscore", args.bertscore,
+        "--gate", args.gate,
+        "--gate-thresholds", args.gate_thresholds,
+        "--output-dir", str(output_dir),
+        "--collection", derive_collection_for_size(args.scenario, chunk_size),
+    ]
+
+    if args.test_limit:
+        command += ["--test-limit", str(args.test_limit)]
+    if args.no_judge:
+        command.append("--no-judge")
+    if args.use_bertscore:
+        command.append("--use-bertscore")
+
+    return command
+
+
+def run_chunk_sizes_in_parallel(args: argparse.Namespace, chunk_sizes: list[int]) -> int:
+    if args.collection:
+        raise ValueError("--chunk-sizes 사용 시 --collection은 지정하지 마세요.")
+
+    base_output_dir = Path(args.output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+
+    max_parallel = args.max_parallel if args.max_parallel > 0 else len(chunk_sizes)
+    running: list[tuple[int, Path, subprocess.Popen, object]] = []
+    exit_code = 0
+
+    def launch(size: int) -> None:
+        output_dir = derive_output_dir_for_size(base_output_dir, args.scenario, size, args.mode, args.test_limit)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log_path = output_dir / "run.log"
+        log_fh = open(log_path, "w", encoding="utf-8")
+        cmd = build_child_command(args, size, output_dir)
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        proc = subprocess.Popen(cmd, stdout=log_fh, stderr=subprocess.STDOUT, env=env)
+        running.append((size, log_path, proc, log_fh))
+        print(f"[spawn] chunk={size} pid={proc.pid} log={log_path}")
+
+    pending = list(chunk_sizes)
+    while pending or running:
+        while pending and len(running) < max_parallel:
+            launch(pending.pop(0))
+
+        next_running: list[tuple[int, Path, subprocess.Popen, object]] = []
+        for size, log_path, proc, log_fh in running:
+            status = proc.poll()
+            if status is None:
+                next_running.append((size, log_path, proc, log_fh))
+                continue
+            log_fh.close()
+            print(f"[done] chunk={size} exit_code={status} log={log_path}")
+            if status != 0 and exit_code == 0:
+                exit_code = status
+        running = next_running
+
+        if running:
+            time.sleep(2)
+
+    return exit_code
+
+
 def build_gate_report(all_summaries: dict, thresholds: dict, mode: str) -> dict:
     report = {"mode": mode, "thresholds": thresholds, "configs": {}, "best_config": None}
 
@@ -276,6 +376,13 @@ def save_gate_reports(gate_report: dict, output_dir: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Run RAG evaluation suite.")
     parser.add_argument(
+        "--scenario",
+        type=str,
+        default="B",
+        choices=["A", "B"],
+        help="평가 시나리오 선택 (A=로컬 HF, B=OpenAI API)",
+    )
+    parser.add_argument(
         "--mode",
         type=str,
         default="core",
@@ -309,12 +416,29 @@ def main():
     parser.add_argument("--use-bertscore", action="store_true", help="(legacy) Enable BERTScore")
     parser.add_argument("--output-dir", type=str, default="evaluation")
     parser.add_argument(
+        "--chunk-sizes",
+        type=str,
+        default="",
+        help="여러 chunk 크기를 병렬 실행 (쉼표 구분, 예: 600,800,1000,1200)",
+    )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=0,
+        help="chunk-sizes 병렬 실행 시 동시 실행 개수 (0=전체 동시 실행)",
+    )
+    parser.add_argument(
         "--collection",
         type=str,
-        default="rfp_chunk600",
-        help="평가에 사용할 ChromaDB 컬렉션 이름 (기본: rfp_chunk600)",
+        default="",
+        help="평가에 사용할 ChromaDB 컬렉션 이름 (미지정 시 A=rfp_chunk600_a, B=rfp_chunk600)",
     )
     args = parser.parse_args()
+
+    chunk_sizes = parse_chunk_sizes(args.chunk_sizes)
+    if chunk_sizes:
+        raise_code = run_chunk_sizes_in_parallel(args, chunk_sizes)
+        sys.exit(raise_code)
 
     use_llm_judge, use_bertscore = resolve_mode_flags(
         mode=args.mode,
@@ -326,8 +450,16 @@ def main():
 
     questions = select_questions(args.test_limit)
     output_dir = Path(args.output_dir)
+    collection_name = resolve_default_collection(args.scenario, args.collection)
 
-    print(f"mode={args.mode} | judge={use_llm_judge} | bertscore={use_bertscore} | test_limit={args.test_limit or 'all'} | collection={args.collection}")
+    print(
+        f"scenario={args.scenario} | mode={args.mode} | judge={use_llm_judge} | "
+        f"bertscore={use_bertscore} | test_limit={args.test_limit or 'all'} | "
+        f"collection={collection_name}"
+    )
+
+    if args.scenario == "A" and use_llm_judge and not os.getenv("OPENAI_API_KEY"):
+        print("[warn] scenario A에서도 LLM judge는 OpenAI API를 사용합니다. OPENAI_API_KEY가 필요합니다.")
 
     configs = [
         {"label": "similarity_k5", "kwargs": {"retrieval_method": "similarity", "retrieval_top_k": 5}},
@@ -336,10 +468,12 @@ def main():
         {"label": "similarity_k10", "kwargs": {"retrieval_method": "similarity", "retrieval_top_k": 10}},
     ]
 
+    skip_keys = {"avg_total_tokens"} if args.scenario == "A" else set()
+
     all_summaries = {}
     for cfg in configs:
         config = Config(
-            scenario="B",
+            scenario=args.scenario,
             metadata_csv=paths.METADATA_CSV,
             vectordb_dir=paths.VECTORDB_DIR,
             **cfg["kwargs"],
@@ -351,7 +485,8 @@ def main():
             questions=questions,
             use_llm_judge=use_llm_judge,
             use_bertscore=use_bertscore,
-            collection_name=args.collection,
+            collection_name=collection_name,
+            skip_keys=skip_keys,
         )
         save_mode_csv(df=df, output_dir=output_dir, label=cfg["label"], mode=args.mode)
 
