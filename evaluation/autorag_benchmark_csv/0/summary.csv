@@ -1,0 +1,6 @@
+node_line_name,node_type,best_module_filename,best_module_name,best_module_params,best_execution_time
+retrieve_node_line,lexical_retrieval,10.parquet,BM25,"{'bm25_tokenizer': 'ko_okt', 'top_k': 1}",0.0086408906082542
+retrieve_node_line,semantic_retrieval,0.parquet,VectorDB,"{'vectordb': 'local_bge', 'top_k': 1}",0.0945575607901659
+retrieve_node_line,hybrid_retrieval,0.parquet,HybridRRF,"{'top_k': 8, 'weight': 4.0}",0.1657983144861916
+post_retrieve_node_line,prompt_maker,0.parquet,Fstring,{'prompt': '다음 RFP 문서를 바탕으로 질문에 단계적으로 답변하세요.\n\n1단계: 질문의 핵심 의도를 파악하세요.\n2단계: 문서에서 관련 내용을 찾으세요.\n3단계: 근거를 바탕으로 명확하게 답변하세요.\n\n[문서]\n{retrieved_contents}\n\n[질문]\n{query}\n\n답변:\n'},0.0008774373481555
+post_retrieve_node_line,generator,14.parquet,Vllm,"{'llm': '/home/potaeto/sprint_ai_07_middle/shared_data/models/kanana/kanana-1.5-2.1b', 'max_tokens': 256, 'temperature': 0.2, 'top_p': 0.85, 'gpu_memory_utilization': 0.7, 'kv_cache_dtype': 'auto'}",0.1138621350175543

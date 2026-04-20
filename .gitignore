@@ -47,6 +47,14 @@ data/vectordb/
 evaluation/b_chunk600_full_core_v2/run.log
 evaluation/b_chunk800_full_core_v2/run.log
 
+# A안 AutoRAG 평가 결과 (resources/ 제외 — chroma/bm25 인덱스는 재생성 가능)
+!evaluation/autorag_benchmark_csv/
+!evaluation/autorag_benchmark_csv/**
+evaluation/autorag_benchmark_csv/resources/
+!evaluation/autorag_benchmark_csv_gemma/
+!evaluation/autorag_benchmark_csv_gemma/**
+evaluation/autorag_benchmark_csv_gemma/resources/
+
 # Finetuned model weights (large binary files — use NAS or shared storage)
 models/finetuned/
 
