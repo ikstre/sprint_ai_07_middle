@@ -388,7 +388,7 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 
 | 컬렉션명 | 시나리오 | 임베딩 | chunk_size | 비고 |
 |---------|---------|--------|-----------|------|
-| `rfp_chunk800` | B (OpenAI) | text-embedding-3-small (512) | 800 | **운영 기본값** — 최신 재평가 기준 권장 조합 |
+| `rfp_chunk800` | B (OpenAI) | text-embedding-3-small (512) | 800 | 비교용 — 최신 재평가에서 best_config는 유지됐지만 시간 gate는 미통과 |
 | `rfp_chunk600` | B (OpenAI) | text-embedding-3-small (512) | 600 | 비교용 컬렉션 |
 | `rfp_chunk1000` | B (OpenAI) | text-embedding-3-small (512) | 1000 | 비교용 컬렉션 |
 | `rfp_chunk1200` | B (OpenAI) | text-embedding-3-small (512) | 1200 | HWP 원문 추출 |

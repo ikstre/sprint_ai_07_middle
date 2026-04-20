@@ -7,8 +7,8 @@
 ## 엔트리포인트
 - `app.py`: 메인 Streamlit 앱. 세션 단위 파이프라인/대화 메모리 유지.
   - 사이드바 **실행 모드** 라디오로 A/B 전환. 시나리오에 따라 컬렉션 목록 자동 전환.
-  - B안: `rfp_chunk600`, `rfp_chunk1200`
-  - A안: `rfp_chunk1200_a`, `rfp_chunk800_a`, `rfp_chunk1200_a_sroberta`
+  - B안: `rfp_chunk600`, `rfp_chunk800`, `rfp_chunk1000`, `rfp_chunk1200`
+  - A안: `rfp_chunk600_a`, `rfp_chunk800_a`, `rfp_chunk1000_a`, `rfp_chunk1200_a`
 - `scripts/index_documents.py`: 문서 로딩, 청킹, 임베딩, 벡터스토어 적재.
 - `scripts/run_evaluation.py`: `core`/`detailed` 평가 실행 및 리포트 저장.
 - `scripts/check_release_gate.py`: `core` 평가 + 게이트 판정을 단일 커맨드로 실행.
@@ -26,7 +26,7 @@
 | 환경변수 | 기본값 | 역할 |
 |---------|--------|------|
 | `SRV_DATA_DIR` | `/srv/shared_data` | 서버 루트 |
-| `METADATA_CSV` | `{SRV_DATA_DIR}/datasets/data_list_cleaned.csv` | 메타데이터 CSV |
+| `METADATA_CSV` | 로컬 `data/data_list_cleaned.csv` 우선, 없으면 `{SRV_DATA_DIR}/datasets/data_list_cleaned.csv` fallback | 메타데이터 CSV |
 | `MODEL_DIR` | `{SRV_DATA_DIR}/models` | 모델 루트 |
 | `EMBEDDING_MODEL_PATH` | `{MODEL_DIR}/embeddings/BGE-m3-ko` | 임베딩 모델 |
 | `CHAT_MODEL_PATH` | `{MODEL_DIR}/exaone/EXAONE-4.0-1.2B` | 채팅 모델 |
@@ -52,7 +52,7 @@
   - `routing_simple_model`: 단순 질문용 경량 모델 (gpt-5-nano)
   - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (80)
   - `max_tokens`: 3500
-  - `retrieval_method`: `similarity` (앱 기본값, 운영 권장 조합은 `rfp_chunk800 + similarity_k5`)
+  - `retrieval_method`: `similarity` (앱 기본값, 최신 재평가에서는 4개 chunk 모두 `similarity_k5`가 best_config)
   - `conversation_memory_k`: 3
   - `max_context_chars_per_doc`: 800
 - **Scenario A 전용**
