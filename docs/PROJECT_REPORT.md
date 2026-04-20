@@ -115,12 +115,32 @@
 
 ### 4.3 A안 AutoRAG 자동 최적화 결과
 
-| 노드 | best module | 주요 파라미터 |
-|---|---|---|
-| lexical_retrieval | BM25 | tokenizer=ko_okt, top_k=1 |
-| semantic_retrieval | VectorDB | local_bge, top_k=1 |
-| hybrid_retrieval | HybridRRF | top_k=8, weight=4.0 |
-| generator | vLLM | kanana-1.5-2.1b, temperature=0.2 |
+총 **132개** 생성 조합 탐색 (메인 trial 97개 + Gemma4 확장 trial 35개 병합, chunk=800).
+
+**노드별 best**
+
+| 노드 | best module | 주요 파라미터 | 지표 |
+|---|---|---|---|
+| lexical_retrieval | BM25 | tokenizer=ko_okt, top_k=1 | — |
+| semantic_retrieval | VectorDB | local_bge, top_k=1 | f1/nDCG/MAP=0.9420 |
+| hybrid_retrieval | HybridRRF | top_k=8, weight=4.0 | — |
+| generator | Gemma3 파인튜닝 | max_tokens=256, temp=0.9, top_k=64 | **meteor=0.3080** |
+| prompt_maker | Fstring | 3단계 RFP 답변 프롬프트 | prompt_maker_meteor=0.0699 |
+
+**생성 모델별 최고 meteor (132개 조합 기준)**
+
+| 모델 | 최고 meteor | 평균 meteor | 비고 |
+|---|---:|---:|---|
+| **Gemma3 파인튜닝** | **0.3080** | 0.3010 | LoRA, max_tokens=256, temp=0.9 |
+| Gemma3-4B (비파인튜닝) | 0.3071 | 0.3025 | enforce_eager, max_model_len=8192 |
+| kanana-1.5 파인튜닝 | 0.2981 | 0.2682 | LoRA |
+| Midm-2.0-Mini | 0.2963 | 0.2934 | |
+| Gemma4-E4B 파인튜닝 | 0.2897 | 0.2545 | QLoRA, Gemma4 확장 trial |
+| EXAONE-Deep-7.8B 파인튜닝 | 0.2081 | 0.1954 | QLoRA, Gemma4 확장 trial |
+| EXAONE-Deep-2.4B 파인튜닝 | 0.2016 | 0.1848 | LoRA |
+| EXAONE-4.0-1.2B | 0.0818 | 0.0730 | |
+
+> Gemma4 확장 trial은 GPU 메모리 제약으로 별도 환경에서 실행 후 `scripts/merge_gemma4_results.py`로 메인 trial에 병합.
 
 ### 4.4 카테고리별 성능 (chunk800 similarity_k5)
 
@@ -151,10 +171,11 @@
 - 1200: `mmr_k5`만 FAIL, 나머지 PASS
 
 **A안 권장 설정**
-- 청크 크기: 800자 기본 사용, AutoRAG 최적화 참고치는 600자
+- 청크 크기: 800자
 - retrieval: `HybridRRF` (top_k=8, weight=4.0)
-- 임베딩: `BGE-m3-ko` (1024-dim)
-- 생성: `kanana-1.5-2.1b` (LoRA 파인튜닝 적용)
+- 임베딩: `BGE-m3-ko` (1024-dim, f1/nDCG=0.9420)
+- 생성: **Gemma3 파인튜닝** (LoRA, max_tokens=256, temp=0.9, meteor=0.3080)
+- 프롬프트: Fstring 3단계 RFP 답변 프롬프트
 
 ### 5.2 개선 이력 (PR #26~#36)
 
@@ -166,6 +187,7 @@
 | #34 | `run_evaluation.py` A/B안 통합, 버그 수정 | 평가 파이프라인 일원화 |
 | #35 | field_coverage 개선 (`[필드 후보]` 주입), 병렬 평가, A안 800 인덱싱 | 핵심 필드 추출 강화 |
 | #36 | B안 chunk1000/1200 평가 결과 추가 | 청크 크기 민감도 분석 완료 |
+| #41 | AutoRAG 대시보드 Gemma4 결과 미표시 수정, merge_gemma4_results.py 재작성 | best 판정 지표(meteor) 교정, 132개 조합 통합 완료 |
 
 ### 5.3 보류·미충족 구성
 

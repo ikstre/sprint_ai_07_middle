@@ -29,6 +29,7 @@ sprint_ai_07_middle/
 │   ├── prepare_autorag_from_csv.py # CSV → corpus/qa parquet
 │   ├── index_documents.py          # 문서 → ChromaDB 인덱싱
 │   ├── run_autorag_optimization.py # AutoRAG 평가 실행
+│   ├── merge_gemma4_results.py     # Gemma4 별도 AutoRAG 결과를 메인 trial에 병합
 │   ├── finetune_local.py           # LoRA/QLoRA 파인튜닝
 │   ├── finetune_openai.py          # OpenAI Fine-tuning API
 │   ├── run_evaluation.py           # 질문지 기반 서비스 평가 (A/B안, Chroma 컬렉션 대상)
@@ -224,18 +225,27 @@ python scripts/run_autorag_optimization.py \
   --qa-path data/autorag_csv_800/qa.parquet \
   --corpus-path data/autorag_csv_800/corpus.parquet \
   --config-path configs/autorag/local_csv.yaml \
-  --project-dir evaluation/autorag_benchmark_csv_800
+  --project-dir evaluation/autorag_benchmark_csv
 ```
 
 #### Step 5. 결과 확인
 
 ```bash
 # 요약 CSV
-cat evaluation/autorag_benchmark_csv_800/0/retrieve_node_line/*/summary.csv
-cat evaluation/autorag_benchmark_csv_800/0/post_retrieve_node_line/*/summary.csv
+cat evaluation/autorag_benchmark_csv/0/retrieve_node_line/*/summary.csv
+cat evaluation/autorag_benchmark_csv/0/post_retrieve_node_line/*/summary.csv
 
 # 대시보드
-autorag dashboard --trial_dir evaluation/autorag_benchmark_csv_800/0
+autorag dashboard --trial_dir evaluation/autorag_benchmark_csv/0
+```
+
+#### Step 5-1. Gemma4 결과 병합 (별도 GPU 환경에서 실험한 경우)
+
+```bash
+# Gemma4 전용 환경에서 AutoRAG 실행 후 별도 프로젝트 디렉터리에 결과가 있을 때
+python scripts/merge_gemma4_results.py \
+  --main-dir evaluation/autorag_benchmark_csv \
+  --gemma4-dir evaluation/autorag_benchmark_csv_gemma
 ```
 
 ---
@@ -337,7 +347,9 @@ python scripts/check_release_gate.py
 
 ## 모델 목록
 
-### AutoRAG 평가 모델 (`local_csv.yaml`)
+### AutoRAG 평가 모델
+
+**메인 trial** (`local_csv.yaml`, `evaluation/autorag_benchmark_csv`)
 
 | 모델 | 크기 | gpu_memory_utilization | 비고 |
 |------|------|------------------------|------|
@@ -346,6 +358,14 @@ python scripts/check_release_gate.py
 | Midm-2.0-Mini | 4.4G | 0.70 | |
 | EXAONE-Deep-2.4B | 4.5G | 0.70 | trust_remote_code |
 | Gemma3-4B | 8.1G | **0.90** | max_model_len=8192, enforce_eager |
+
+**Gemma4 확장 trial** (`local_csv_pipeline_gemma.yaml`, `evaluation/autorag_benchmark_csv_gemma`, 병합 후 포함)
+
+| 모델 | 크기 | gpu_memory_utilization | 비고 |
+|------|------|------------------------|------|
+| Gemma3 (파인튜닝) | 8.1G | 0.70 | max_model_len=16384 |
+| EXAONE-Deep-7.8B (파인튜닝) | 15G | 0.70 | trust_remote_code |
+| Gemma4-E4B (파인튜닝) | 15G | 0.70 | QLoRA 적용 |
 
 ### 임베딩 모델 (AutoRAG 5종 비교)
 
