@@ -46,6 +46,7 @@ with st.sidebar:
             "rfp_chunk1000",
             "rfp_chunk1200",
         ]
+        default_collection_index = 1
     else:
         _collections = [
             "rfp_chunk600_a",
@@ -53,11 +54,12 @@ with st.sidebar:
             "rfp_chunk1000_a",
             "rfp_chunk1200_a",
         ]
+        default_collection_index = 1
 
     collection = st.selectbox(
         "컬렉션 (청크 크기)",
         _collections,
-        index=0,
+        index=default_collection_index,
         help="인덱싱 시 사용한 청크 크기별 컬렉션을 선택합니다.",
     )
 
@@ -119,7 +121,7 @@ with st.sidebar:
     retrieval_method = st.selectbox(
         "검색 방식",
         ["similarity", "mmr", "hybrid"],
-        index=2,
+        index=0,
     )
     top_k = st.slider("Top-K (검색 결과 수)", 3, 15, 5)
     use_reranker = st.checkbox("Re-ranking 사용", value=False)
