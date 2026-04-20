@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -191,6 +192,12 @@ def load_gate_thresholds(path: Optional[str]) -> dict:
         return json.load(f)
 
 
+def resolve_default_collection(scenario: str, collection: str) -> str:
+    if collection:
+        return collection
+    return "rfp_chunk600_a" if scenario == "A" else "rfp_chunk600"
+
+
 def build_gate_report(all_summaries: dict, thresholds: dict, mode: str) -> dict:
     report = {"mode": mode, "thresholds": thresholds, "configs": {}, "best_config": None}
 
@@ -276,6 +283,13 @@ def save_gate_reports(gate_report: dict, output_dir: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Run RAG evaluation suite.")
     parser.add_argument(
+        "--scenario",
+        type=str,
+        default="B",
+        choices=["A", "B"],
+        help="평가 시나리오 선택 (A=로컬 HF, B=OpenAI API)",
+    )
+    parser.add_argument(
         "--mode",
         type=str,
         default="core",
@@ -311,8 +325,8 @@ def main():
     parser.add_argument(
         "--collection",
         type=str,
-        default="rfp_chunk600",
-        help="평가에 사용할 ChromaDB 컬렉션 이름 (기본: rfp_chunk600)",
+        default="",
+        help="평가에 사용할 ChromaDB 컬렉션 이름 (미지정 시 A=rfp_chunk600_a, B=rfp_chunk600)",
     )
     args = parser.parse_args()
 
@@ -326,8 +340,16 @@ def main():
 
     questions = select_questions(args.test_limit)
     output_dir = Path(args.output_dir)
+    collection_name = resolve_default_collection(args.scenario, args.collection)
 
-    print(f"mode={args.mode} | judge={use_llm_judge} | bertscore={use_bertscore} | test_limit={args.test_limit or 'all'} | collection={args.collection}")
+    print(
+        f"scenario={args.scenario} | mode={args.mode} | judge={use_llm_judge} | "
+        f"bertscore={use_bertscore} | test_limit={args.test_limit or 'all'} | "
+        f"collection={collection_name}"
+    )
+
+    if args.scenario == "A" and use_llm_judge and not os.getenv("OPENAI_API_KEY"):
+        print("[warn] scenario A에서도 LLM judge는 OpenAI API를 사용합니다. OPENAI_API_KEY가 필요합니다.")
 
     configs = [
         {"label": "similarity_k5", "kwargs": {"retrieval_method": "similarity", "retrieval_top_k": 5}},
@@ -339,7 +361,7 @@ def main():
     all_summaries = {}
     for cfg in configs:
         config = Config(
-            scenario="B",
+            scenario=args.scenario,
             metadata_csv=paths.METADATA_CSV,
             vectordb_dir=paths.VECTORDB_DIR,
             **cfg["kwargs"],
@@ -351,14 +373,15 @@ def main():
             questions=questions,
             use_llm_judge=use_llm_judge,
             use_bertscore=use_bertscore,
-            collection_name=args.collection,
+            collection_name=collection_name,
         )
         save_mode_csv(df=df, output_dir=output_dir, label=cfg["label"], mode=args.mode)
 
         # Save a concise mode-specific summary file.
         mode_summary = {"mode": args.mode, "config": cfg["label"]}
+        skip_keys = {"avg_total_tokens"} if args.scenario == "A" else set()
         for key in CORE_METRICS + (DETAILED_EXTRA_METRICS if args.mode == "detailed" else []):
-            if key in summary:
+            if key in summary and key not in skip_keys:
                 mode_summary[key] = summary[key]
         with open(output_dir / f"summary_{cfg['label']}_{args.mode}.json", "w", encoding="utf-8") as f:
             json.dump(mode_summary, f, ensure_ascii=False, indent=2)
