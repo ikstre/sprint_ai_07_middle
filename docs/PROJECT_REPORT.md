@@ -151,7 +151,7 @@
 - 1200: `mmr_k5`만 FAIL, 나머지 PASS
 
 **A안 권장 설정**
-- 청크 크기: 600자 (AutoRAG 최적화 결과)
+- 청크 크기: 800자 기본 사용, AutoRAG 최적화 참고치는 600자
 - retrieval: `HybridRRF` (top_k=8, weight=4.0)
 - 임베딩: `BGE-m3-ko` (1024-dim)
 - 생성: `kanana-1.5-2.1b` (LoRA 파인튜닝 적용)

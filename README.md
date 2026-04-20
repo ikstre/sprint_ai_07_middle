@@ -5,6 +5,10 @@
 - **A안**: 로컬 모델 + AutoRAG 최적화 + LoRA 파인튜닝 (GPU 서버)
 - **B안**: OpenAI API 기반 서비스형 RAG
 
+## 협업일지
+
+- Notion: https://www.notion.so/AI-7-1-3347356fc5cb8199b3b1c1c83dd1467b?source=copy_link
+
 ---
 
 ## 디렉토리 구조
@@ -184,8 +188,8 @@ python scripts/prepare_autorag_from_csv.py \
 # Scenario A — 로컬 임베딩 (기본: BGE-m3-ko)
 python scripts/index_documents.py \
   --scenario A \
-  --from-parquet data/autorag_csv_600/corpus.parquet \
-  --collection rfp_chunk600_a \
+  --from-parquet data/autorag_csv_800/corpus.parquet \
+  --collection rfp_chunk800_a \
   --hf-embedding-model bge
 
 # 다른 임베딩 모델 옵션: bge / sroberta / e5 / kosimcse / kf_deberta
@@ -217,21 +221,21 @@ nvidia-smi
 
 # 청크 크기별로 각각 실행
 python scripts/run_autorag_optimization.py \
-  --qa-path data/autorag_csv_600/qa.parquet \
-  --corpus-path data/autorag_csv_600/corpus.parquet \
+  --qa-path data/autorag_csv_800/qa.parquet \
+  --corpus-path data/autorag_csv_800/corpus.parquet \
   --config-path configs/autorag/local_csv.yaml \
-  --project-dir evaluation/autorag_benchmark_csv_600
+  --project-dir evaluation/autorag_benchmark_csv_800
 ```
 
 #### Step 5. 결과 확인
 
 ```bash
 # 요약 CSV
-cat evaluation/autorag_benchmark_csv_600/0/retrieve_node_line/*/summary.csv
-cat evaluation/autorag_benchmark_csv_600/0/post_retrieve_node_line/*/summary.csv
+cat evaluation/autorag_benchmark_csv_800/0/retrieve_node_line/*/summary.csv
+cat evaluation/autorag_benchmark_csv_800/0/post_retrieve_node_line/*/summary.csv
 
 # 대시보드
-autorag dashboard --trial_dir evaluation/autorag_benchmark_csv_600/0
+autorag dashboard --trial_dir evaluation/autorag_benchmark_csv_800/0
 ```
 
 ---
@@ -244,14 +248,14 @@ autorag dashboard --trial_dir evaluation/autorag_benchmark_csv_600/0
 # OpenAI 임베딩 (text-embedding-3-small)
 python scripts/index_documents.py \
   --scenario B \
-  --collection rfp_chunk600 \
-  --chunk-size 600
+  --collection rfp_chunk800 \
+  --chunk-size 800
 
 # CSV 기반 corpus 직접 임베딩
 python scripts/index_documents.py \
   --scenario B \
-  --from-parquet data/autorag_csv_600/corpus.parquet \
-  --collection rfp_chunk600
+  --from-parquet data/autorag_csv_800/corpus.parquet \
+  --collection rfp_chunk800
 ```
 
 ### Step 2. 앱 실행
@@ -269,15 +273,15 @@ streamlit run app.py
 python scripts/run_evaluation.py \
   --scenario B \
   --mode core \
-  --collection rfp_chunk600 \
+  --collection rfp_chunk800 \
   --output-dir evaluation
 
 # Scenario A core 평가
 python scripts/run_evaluation.py \
   --scenario A \
   --mode core \
-  --collection rfp_chunk600_a \
-  --output-dir evaluation/a_chunk600_core
+  --collection rfp_chunk800_a \
+  --output-dir evaluation/a_chunk800_core
 
 # 여러 chunk 크기 병렬 평가 (예: B안 600/800/1000/1200)
 python scripts/run_evaluation.py \
@@ -301,7 +305,7 @@ python scripts/check_release_gate.py
 주의:
 - `run_evaluation.py`는 Chroma 컬렉션을 대상으로 하는 질문지 기반 서비스 평가입니다.
 - 저장소에 커밋된 `evaluation/autorag_benchmark_csv`, `evaluation/autorag_benchmark_csv_gemma` 는 A안 AutoRAG 벤치마크 결과이며, `run_evaluation.py`의 출력이 아닙니다.
-- 현재 저장소에 가공 청크가 포함된 A안 기준 산출물은 `rfp_chunk600_a`, `rfp_chunk800_a` 계열이므로, A안 질문지 평가는 이 컬렉션들부터 사용하는 것이 안전합니다.
+- 현재 저장소에 가공 청크가 포함된 A안 기준 산출물은 `rfp_chunk600_a`, `rfp_chunk800_a` 계열이며, 현재 운영 기본값은 `rfp_chunk800_a`입니다.
 - A안에서 `--mode detailed` 또는 `--judge on`을 쓰면 judge 단계는 여전히 OpenAI API를 사용합니다.
 - `--chunk-sizes`를 쓰면 각 크기별 평가를 별도 하위 디렉터리에 병렬 실행하고, 로그는 각 `run.log`에 저장합니다.
 

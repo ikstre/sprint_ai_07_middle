@@ -52,7 +52,7 @@
   - `routing_simple_model`: 단순 질문용 경량 모델 (gpt-5-nano)
   - `routing_complexity_threshold`: 단순/복잡 분기 글자 수 기준 (80)
   - `max_tokens`: 3500
-  - `retrieval_method`: `hybrid` (기본값)
+  - `retrieval_method`: `similarity` (앱 기본값, 운영 권장 조합은 `rfp_chunk800 + similarity_k5`)
   - `conversation_memory_k`: 3
   - `max_context_chars_per_doc`: 800
 - **Scenario A 전용**

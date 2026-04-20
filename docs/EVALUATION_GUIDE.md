@@ -48,27 +48,27 @@ python scripts/check_release_gate.py
 
 - core
 ```bash
-python scripts/run_evaluation.py --scenario B --mode core --collection rfp_chunk600 --output-dir evaluation
+python scripts/run_evaluation.py --scenario B --mode core --collection rfp_chunk800 --output-dir evaluation
 ```
 
 - detailed
 ```bash
-python scripts/run_evaluation.py --scenario B --mode detailed --collection rfp_chunk600 --output-dir evaluation
+python scripts/run_evaluation.py --scenario B --mode detailed --collection rfp_chunk800 --output-dir evaluation
 ```
 
 - 테스트 샘플 축소
 ```bash
-python scripts/run_evaluation.py --scenario B --mode detailed --collection rfp_chunk600 --test-limit 2 --output-dir evaluation
+python scripts/run_evaluation.py --scenario B --mode detailed --collection rfp_chunk800 --test-limit 2 --output-dir evaluation
 ```
 
 - A안 질문지 평가
 ```bash
-python scripts/run_evaluation.py --scenario A --mode core --collection rfp_chunk600_a --output-dir evaluation/a_chunk600_core
+python scripts/run_evaluation.py --scenario A --mode core --collection rfp_chunk800_a --output-dir evaluation/a_chunk800_core
 ```
 
 - A안 상세 평가
 ```bash
-python scripts/run_evaluation.py --scenario A --mode detailed --collection rfp_chunk600_a --output-dir evaluation/a_chunk600_detailed
+python scripts/run_evaluation.py --scenario A --mode detailed --collection rfp_chunk800_a --output-dir evaluation/a_chunk800_detailed
 ```
   - `detailed` 또는 `--judge on`은 judge 단계에서 OpenAI API를 사용하므로 `OPENAI_API_KEY`가 필요합니다.
 
@@ -94,7 +94,7 @@ python scripts/run_evaluation.py \
   --scenario B \
   --mode core \
   --gate on \
-  --collection rfp_chunk600 \
+  --collection rfp_chunk800 \
   --gate-thresholds configs/evaluation/core_gate.default.json \
   --output-dir evaluation
 ```

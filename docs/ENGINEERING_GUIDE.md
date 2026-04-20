@@ -388,10 +388,12 @@ llm: ft:gpt-4o-mini-2024-07-18:org:rag:xxxx
 
 | 컬렉션명 | 시나리오 | 임베딩 | chunk_size | 비고 |
 |---------|---------|--------|-----------|------|
-| `rfp_chunk600` | B (OpenAI) | text-embedding-3-small (512) | 600 | **기본값** — CSV 정제 데이터, 664청크 |
+| `rfp_chunk800` | B (OpenAI) | text-embedding-3-small (512) | 800 | **운영 기본값** — 최신 재평가 기준 권장 조합 |
+| `rfp_chunk600` | B (OpenAI) | text-embedding-3-small (512) | 600 | 비교용 컬렉션 |
+| `rfp_chunk1000` | B (OpenAI) | text-embedding-3-small (512) | 1000 | 비교용 컬렉션 |
 | `rfp_chunk1200` | B (OpenAI) | text-embedding-3-small (512) | 1200 | HWP 원문 추출 |
+| `rfp_chunk800_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 800 | **A안 기본값** |
 | `rfp_chunk1200_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 1200 | |
-| `rfp_chunk800_a` | A (BGE-m3-ko) | BGE-m3-ko (1024) | 800 | |
 | `rfp_chunk1200_a_sroberta` | A (ko-sroberta) | ko-sroberta-multitask (768) | 1200 | |
 
 ---
