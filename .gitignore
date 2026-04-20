@@ -44,8 +44,17 @@ data/vectordb/
 !evaluation/b_chunk600_full_core_v2/**
 !evaluation/b_chunk800_full_core_v2/
 !evaluation/b_chunk800_full_core_v2/**
+!evaluation/b_chunk1000_full_core_v2/
+!evaluation/b_chunk1000_full_core_v2/**
+!evaluation/b_chunk1200_full_core_v2/
+!evaluation/b_chunk1200_full_core_v2/**
+!evaluation/parallel_b_fieldcov/
+!evaluation/parallel_b_fieldcov/**
 evaluation/b_chunk600_full_core_v2/run.log
 evaluation/b_chunk800_full_core_v2/run.log
+evaluation/b_chunk1000_full_core_v2/run.log
+evaluation/b_chunk1200_full_core_v2/run.log
+evaluation/parallel_b_fieldcov/**/run.log
 
 # A안 AutoRAG 평가 결과 (resources/ 제외 — chroma/bm25 인덱스는 재생성 가능)
 !evaluation/autorag_benchmark_csv/

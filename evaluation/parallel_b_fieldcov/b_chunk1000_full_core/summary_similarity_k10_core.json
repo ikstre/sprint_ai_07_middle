@@ -1,0 +1,13 @@
+{
+  "mode": "core",
+  "config": "similarity_k10",
+  "avg_elapsed_time": 5.808656268119812,
+  "p50_elapsed_time": 5.233108162879944,
+  "p95_elapsed_time": 10.664746451377868,
+  "avg_hit_at_5": 0.86,
+  "avg_ndcg_at_5": 0.8061194369226931,
+  "avg_keyword_recall": 0.195,
+  "avg_field_coverage": 0.555,
+  "avg_grounded_token_ratio": 0.5841467887354219,
+  "avg_total_tokens": 4643.43
+}

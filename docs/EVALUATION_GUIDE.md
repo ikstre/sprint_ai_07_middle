@@ -19,6 +19,27 @@
 - 저장소에 커밋된 `evaluation/autorag_benchmark_csv`, `evaluation/autorag_benchmark_csv_gemma` 는 A안 AutoRAG 벤치마크 결과물입니다.
 - `run_evaluation.py`는 이 디렉터리를 직접 읽지 않고, 지정한 Chroma 컬렉션(`--collection`)을 대상으로 평가합니다.
 
+## 최신 core 결과 요약
+
+- 최신 B안 병렬 core 재평가 결과는 `evaluation/parallel_b_fieldcov/`에 저장되었습니다.
+- chunk별 best gate 기준:
+  - `600`: `hybrid_k5` PASS, `similarity_k10` PASS
+  - `800`: 4개 config 전부 PASS
+  - `1000`: 4개 config 전부 PASS
+  - `1200`: `mmr_k5`만 FAIL, 나머지 PASS
+- 운영 기본 추천값은 여전히 `rfp_chunk800 + similarity_k5`입니다.
+- 대표 수치:
+  - `800 similarity_k5`: p95 `8.85s`, hit@5 `0.88`, nDCG@5 `0.840`, field_coverage `0.57`, grounded `0.561`
+  - `1000 similarity_k5`: p95 `9.04s`, field_coverage `0.562`, grounded `0.568`
+  - `1200 similarity_k5`: p95 `8.46s`, field_coverage `0.556`, grounded `0.560`
+
+| chunk | best_config | gate | p95(s) | hit@5 | field_cov | grounded |
+|---|---|---:|---:|---:|---:|---:|
+| 600 | `hybrid_k5` | 5/5 | 11.54 | 0.875 | 0.562 | 0.562 |
+| 800 | `similarity_k5` | 5/5 | 8.85 | 0.880 | 0.570 | 0.561 |
+| 1000 | `similarity_k5` | 5/5 | 9.04 | 0.860 | 0.562 | 0.568 |
+| 1200 | `similarity_k5` | 5/5 | 8.46 | 0.865 | 0.556 | 0.560 |
+
 ## 실행 커맨드
 - 릴리즈 게이트 원커맨드 (권장)
 ```bash
@@ -62,6 +83,7 @@ python scripts/run_evaluation.py \
   - 각 크기는 별도 하위 디렉터리에서 실행됩니다.
   - 예: `evaluation/b_chunk600_full_core/run.log`
   - `--max-parallel N`으로 동시 실행 개수를 제한할 수 있습니다.
+  - 최신 전체 재평가 예시는 `evaluation/parallel_b_fieldcov/b_chunk{600,800,1000,1200}_full_core`에 남아 있습니다.
 
 ## Gate 리포트
 - 기본 Gate 임계값은 코드 내 `DEFAULT_CORE_GATE_THRESHOLDS`를 사용합니다.
