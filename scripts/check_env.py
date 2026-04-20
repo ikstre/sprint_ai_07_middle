@@ -132,6 +132,7 @@ def check_packages() -> bool:
         ("langchain_text_splitters", "LangChain splitter"),
         ("streamlit", "Streamlit"),
         ("pypdf", "PDF 파서"),
+        ("FlagEmbedding", "FlagEmbedding reranker"),
     ]
     ok = True
     for pkg, label in packages:

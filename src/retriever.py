@@ -36,27 +36,53 @@ class Retriever:
         self._reranker = None
 
     def build_metadata_filter(self, query: str, metadata_df=None) -> Optional[dict]:
-        """쿼리에서 기관명을 추출해 메타데이터 필터를 구성한다."""
+        """쿼리에서 기관명/사업명을 추출해 메타데이터 필터를 구성한다."""
         if metadata_df is None:
             return None
 
         org_col = None
+        biz_col = None
         for col in metadata_df.columns:
             if "기관" in col or "발주" in col:
                 org_col = col
-                break
+            if "사업" in col and "요약" not in col:
+                biz_col = col
+
+        matched_filter: dict[str, str] = {}
 
         if org_col:
+            exact_org_matches = []
+            keyword_org_matches = []
             for _, row in metadata_df.iterrows():
-                org_name = str(row[org_col])
+                org_name = str(row[org_col]).strip()
+                if not org_name or org_name.lower() == "nan":
+                    continue
                 if len(org_name) >= 2 and org_name in query:
-                    return {self._canonical_metadata_key(org_col): org_name}
+                    exact_org_matches.append(org_name)
+                    continue
                 keywords = re.findall(r"[가-힣]{2,}", org_name)
                 for kw in keywords:
                     if len(kw) >= 3 and kw in query:
-                        return {self._canonical_metadata_key(org_col): org_name}
+                        keyword_org_matches.append(org_name)
+                        break
 
-        return None
+            candidates = exact_org_matches or keyword_org_matches
+            if candidates:
+                matched_filter[self._canonical_metadata_key(org_col)] = max(candidates, key=len)
+
+        if biz_col:
+            biz_matches = []
+            for _, row in metadata_df.iterrows():
+                biz_name = str(row[biz_col]).strip()
+                if not biz_name or biz_name.lower() == "nan":
+                    continue
+                if len(biz_name) >= 4 and biz_name in query:
+                    biz_matches.append(biz_name)
+
+            if biz_matches:
+                matched_filter[self._canonical_metadata_key(biz_col)] = max(biz_matches, key=len)
+
+        return matched_filter or None
 
     def similarity_search(
         self,
@@ -170,10 +196,13 @@ class Retriever:
         """LLM을 사용해 쿼리 변형을 생성한다."""
         if llm_client is None:
             if not self.config.openai_api_key:
-                return []
-            from openai import OpenAI
+                return self._generate_heuristic_multi_queries(query)
+            try:
+                from openai import OpenAI
 
-            llm_client = OpenAI(api_key=self.config.openai_api_key)
+                llm_client = OpenAI(api_key=self.config.openai_api_key)
+            except Exception:
+                return self._generate_heuristic_multi_queries(query)
 
         prompt = f"""당신은 RFP(제안요청서) 검색 도우미입니다.
 사용자의 질문을 3가지 다른 관점에서 재구성해 주세요.
@@ -192,11 +221,57 @@ class Retriever:
         if not self.config.openai_chat_model.startswith("gpt-5"):
             kwargs["temperature"] = 0.7
 
-        response = llm_client.chat.completions.create(**kwargs)
+        try:
+            response = llm_client.chat.completions.create(**kwargs)
+        except Exception:
+            return self._generate_heuristic_multi_queries(query)
 
         content = response.choices[0].message.content or ""
         lines = content.strip().split("\n")
-        return [line.strip() for line in lines if line.strip()][:3]
+        cleaned = []
+        for line in lines:
+            line = re.sub(r"^\s*[\-\d\.\)]\s*", "", line.strip())
+            if line and line not in cleaned and line != query:
+                cleaned.append(line)
+        return cleaned[:3] or self._generate_heuristic_multi_queries(query)
+
+    @staticmethod
+    def _generate_heuristic_multi_queries(query: str) -> list[str]:
+        """LLM을 쓰지 못할 때 사용할 가벼운 규칙 기반 쿼리 확장."""
+        normalized = re.sub(r"\s+", " ", query).strip()
+        variants = []
+
+        variants.append(normalized)
+        variants.append(re.sub(r"(핵심 요건|요건|알려줘|정리해줘|설명해줘)$", "", normalized).strip())
+
+        if "입찰 참가자격" in normalized:
+            variants.append(normalized.replace("입찰 참가자격", "제안(입찰) 참가 자격"))
+        elif "참가자격" in normalized:
+            variants.append(normalized.replace("참가자격", "제안(입찰) 참가 자격"))
+
+        if "사업" in normalized and "제안요청서" not in normalized:
+            variants.append(normalized.replace("사업", "사업 제안요청서"))
+
+        deduped = []
+        for variant in variants:
+            variant = variant.strip()
+            if len(variant) >= 4 and variant not in deduped:
+                deduped.append(variant)
+        return deduped[:3]
+
+    @staticmethod
+    def _build_rerank_text(result: dict) -> str:
+        """리랭커가 메타데이터까지 함께 보도록 입력을 보강한다."""
+        meta = result.get("metadata", {})
+        header = []
+        if meta.get("발주기관") or meta.get("발주 기관"):
+            header.append(f"발주기관: {meta.get('발주기관') or meta.get('발주 기관')}")
+        if meta.get("사업명"):
+            header.append(f"사업명: {meta['사업명']}")
+        if meta.get("사업금액") or meta.get("사업 금액"):
+            header.append(f"사업금액: {meta.get('사업금액') or meta.get('사업 금액')}")
+        text = result.get("text", "")
+        return "\n".join(header + [text]) if header else text
 
     def rerank(self, query: str, results: list[dict], top_k: Optional[int] = None) -> list[dict]:
         """Cross-encoder 기반 reranking"""
@@ -204,15 +279,26 @@ class Retriever:
 
         if self._reranker is None:
             try:
+                import torch
                 from FlagEmbedding import FlagReranker
 
-                self._reranker = FlagReranker(self.config.reranker_model, use_fp16=True)
+                self._reranker = FlagReranker(
+                    self.config.reranker_model,
+                    use_fp16=torch.cuda.is_available(),
+                )
             except ImportError:
                 print("FlagEmbedding 미설치: reranking을 건너뜁니다.")
                 return results[:k]
+            except Exception as e:
+                print(f"reranker 초기화 실패: {e}")
+                return results[:k]
 
-        pairs = [[query, r["text"]] for r in results]
-        scores = self._reranker.compute_score(pairs)
+        pairs = [[query, self._build_rerank_text(r)] for r in results]
+        try:
+            scores = self._reranker.compute_score(pairs)
+        except Exception as e:
+            print(f"reranking 실패: {e}")
+            return results[:k]
 
         if isinstance(scores, float):
             scores = [scores]
@@ -315,9 +401,9 @@ class Retriever:
         else:
             results = self._retrieve_with_method(query, method, fetch_k, where)
 
-        results = self._limit_per_source(results, k)
-
         if self.config.use_reranker:
-            results = self.rerank(query, results, top_k=k)
+            results = self.rerank(query, results, top_k=fetch_k)
+
+        results = self._limit_per_source(results, k)
 
         return results

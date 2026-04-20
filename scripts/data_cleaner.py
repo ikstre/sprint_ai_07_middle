@@ -2,18 +2,18 @@
 # 오류를 최소화하는 개선된 버전입니다.
 
 import os
+import sys
 import hashlib
 import re
-import zlib
 import pandas as pd
 import csv
+from pathlib import Path
 from tqdm import tqdm
 from langchain_community.document_loaders import PyPDFLoader
 
-try:
-    import olefile
-except ImportError:
-    pass
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.document_loader import _extract_text_from_hwp
 
 class SmartOriginFrequencyMatcher:
     def __init__(self, raw_data_path, csv_path, fixed_csv_path):
@@ -44,21 +44,10 @@ class SmartOriginFrequencyMatcher:
     def parse_hwp(self, file_path):
         # HWP 파일 텍스트 추출
         try:
-            if not olefile.isOleFile(file_path): return ""
-            f = olefile.OleFileIO(file_path)
-            dirs = f.listdir()
-            text_content = []
-            for d in dirs:
-                if d[0] == "BodyText":
-                    stream = f.openstream("/".join(d))
-                    data = stream.read()
-                    try:
-                        decoded_data = zlib.decompress(data, -15)
-                        text_content.append(decoded_data.decode("utf-16", errors="ignore"))
-                    except:
-                        text_content.append(data.decode("utf-16", errors="ignore"))
-            return " ".join(text_content)
-        except: return ""
+            return _extract_text_from_hwp(file_path)
+        except Exception as e:
+            print(f"HWP 파싱 실패 ({os.path.basename(file_path)}): {e}")
+            return ""
 
     def clean_text(self, text):
         # 스코어 계산용 텍스트 정제
@@ -155,20 +144,8 @@ class SmartOriginFrequencyMatcher:
         if '텍스트' in df_cleaned.columns:
             df_cleaned['텍스트'] = df_cleaned['텍스트'].apply(self.clean_text_content)
 
-        # 원문 텍스트 계열 컬럼은 metadata 오염 방지를 위해 최종 CSV에서 제외
-        excluded_text_cols = {"텍스트", "text", "content", "contents", "본문", "내용", "원문", "원문텍스트"}
-        drop_cols = []
-        for c in df_cleaned.columns:
-            normalized = re.sub(r"[\s_]+", "", str(c).strip().lower())
-            if (
-                normalized in excluded_text_cols
-                or normalized.endswith("text")
-                or normalized.endswith("contents")
-            ):
-                drop_cols.append(c)
-        if drop_cols:
-            df_cleaned.drop(columns=drop_cols, inplace=True)
-            print(f"** 원문 컬럼 제외: {', '.join(drop_cols)} **")
+        # downstream 청킹/평가 파이프라인이 '텍스트' 컬럼을 직접 사용하므로 유지한다.
+        # metadata 오염은 인덱싱 단계에서 별도로 차단한다.
 
         # 입력 CSV와 같은 디렉토리에 cleaned 파일을 생성한다.
         output_dir = os.path.dirname(self.csv_path) if os.path.dirname(self.csv_path) else "."
