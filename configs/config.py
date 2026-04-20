@@ -81,7 +81,7 @@ class Config:
     top_p: float = 0.9                # Scenario A 전용
     max_tokens: int = 3500    # gpt-5 계열은 reasoning + 답변 토큰 합산이므로 답변 공간 확보용 상한.
     conversation_memory_k: int = 3     # 유지할 대화 턴 수
-    max_context_chars_per_doc: int = 800  # 청크별 컨텍스트 최대 길이
+    max_context_chars_per_doc: int = 1200  # 청크별 컨텍스트 최대 길이
     retrieval_fetch_k_multiplier: int = 2  # per-source 제한을 위한 후보 확장 배수
 
     # ── Vector DB 설정 ─────────────────────────────────────────────

@@ -51,6 +51,18 @@ python scripts/run_evaluation.py --scenario A --mode detailed --collection rfp_c
 ```
   - `detailed` 또는 `--judge on`은 judge 단계에서 OpenAI API를 사용하므로 `OPENAI_API_KEY`가 필요합니다.
 
+- 여러 chunk 크기 병렬 평가
+```bash
+python scripts/run_evaluation.py \
+  --scenario B \
+  --mode core \
+  --chunk-sizes 600,800,1000,1200 \
+  --output-dir evaluation
+```
+  - 각 크기는 별도 하위 디렉터리에서 실행됩니다.
+  - 예: `evaluation/b_chunk600_full_core/run.log`
+  - `--max-parallel N`으로 동시 실행 개수를 제한할 수 있습니다.
+
 ## Gate 리포트
 - 기본 Gate 임계값은 코드 내 `DEFAULT_CORE_GATE_THRESHOLDS`를 사용합니다.
 - 기본 평가 컬렉션은 코드상 `rfp_documents`/B안 설정에 가까우므로, 실행 전 실제 인덱스 상태를 확인해야 합니다.

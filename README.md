@@ -279,6 +279,13 @@ python scripts/run_evaluation.py \
   --collection rfp_chunk600_a \
   --output-dir evaluation/a_chunk600_core
 
+# 여러 chunk 크기 병렬 평가 (예: B안 600/800/1000/1200)
+python scripts/run_evaluation.py \
+  --scenario B \
+  --mode core \
+  --chunk-sizes 600,800,1000,1200 \
+  --output-dir evaluation
+
 # LLM judge 포함 상세 평가
 python scripts/run_evaluation.py \
   --scenario B \
@@ -296,6 +303,7 @@ python scripts/check_release_gate.py
 - 저장소에 커밋된 `evaluation/autorag_benchmark_csv`, `evaluation/autorag_benchmark_csv_gemma` 는 A안 AutoRAG 벤치마크 결과이며, `run_evaluation.py`의 출력이 아닙니다.
 - 현재 저장소에 가공 청크가 포함된 A안 기준 산출물은 `rfp_chunk600_a`, `rfp_chunk800_a` 계열이므로, A안 질문지 평가는 이 컬렉션들부터 사용하는 것이 안전합니다.
 - A안에서 `--mode detailed` 또는 `--judge on`을 쓰면 judge 단계는 여전히 OpenAI API를 사용합니다.
+- `--chunk-sizes`를 쓰면 각 크기별 평가를 별도 하위 디렉터리에 병렬 실행하고, 로그는 각 `run.log`에 저장합니다.
 
 ---
 
