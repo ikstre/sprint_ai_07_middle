@@ -1,0 +1,208 @@
+{
+  "mode": "core",
+  "thresholds": {
+    "p95_elapsed_time": {
+      "op": "<=",
+      "value": 12.0
+    },
+    "avg_hit_at_5": {
+      "op": ">=",
+      "value": 0.8
+    },
+    "avg_ndcg_at_5": {
+      "op": ">=",
+      "value": 0.65
+    },
+    "avg_field_coverage": {
+      "op": ">=",
+      "value": 0.55
+    },
+    "avg_grounded_token_ratio": {
+      "op": ">=",
+      "value": 0.55
+    },
+    "decline_accuracy": {
+      "op": ">=",
+      "value": 0.9
+    }
+  },
+  "configs": {
+    "similarity_k5": {
+      "gate_passed": true,
+      "pass_count": 5,
+      "total_count": 5,
+      "pass_ratio": 1.0,
+      "metrics": {
+        "p95_elapsed_time": {
+          "status": "pass",
+          "actual": 8.00493593215942,
+          "op": "<=",
+          "target": 12.0
+        },
+        "avg_hit_at_5": {
+          "status": "pass",
+          "actual": 0.88,
+          "op": ">=",
+          "target": 0.8
+        },
+        "avg_ndcg_at_5": {
+          "status": "pass",
+          "actual": 0.8401243666811861,
+          "op": ">=",
+          "target": 0.65
+        },
+        "avg_field_coverage": {
+          "status": "pass",
+          "actual": 0.5508333333333333,
+          "op": ">=",
+          "target": 0.55
+        },
+        "avg_grounded_token_ratio": {
+          "status": "pass",
+          "actual": 0.6114534460174114,
+          "op": ">=",
+          "target": 0.55
+        },
+        "decline_accuracy": {
+          "status": "missing",
+          "actual": null,
+          "op": ">=",
+          "target": 0.9
+        }
+      }
+    },
+    "mmr_k5": {
+      "gate_passed": false,
+      "pass_count": 4,
+      "total_count": 5,
+      "pass_ratio": 0.8,
+      "metrics": {
+        "p95_elapsed_time": {
+          "status": "pass",
+          "actual": 7.8822462201118455,
+          "op": "<=",
+          "target": 12.0
+        },
+        "avg_hit_at_5": {
+          "status": "pass",
+          "actual": 0.86,
+          "op": ">=",
+          "target": 0.8
+        },
+        "avg_ndcg_at_5": {
+          "status": "pass",
+          "actual": 0.8273691950542431,
+          "op": ">=",
+          "target": 0.65
+        },
+        "avg_field_coverage": {
+          "status": "fail",
+          "actual": 0.51,
+          "op": ">=",
+          "target": 0.55
+        },
+        "avg_grounded_token_ratio": {
+          "status": "pass",
+          "actual": 0.6320112384502596,
+          "op": ">=",
+          "target": 0.55
+        },
+        "decline_accuracy": {
+          "status": "missing",
+          "actual": null,
+          "op": ">=",
+          "target": 0.9
+        }
+      }
+    },
+    "hybrid_k5": {
+      "gate_passed": false,
+      "pass_count": 4,
+      "total_count": 5,
+      "pass_ratio": 0.8,
+      "metrics": {
+        "p95_elapsed_time": {
+          "status": "pass",
+          "actual": 8.829579484462728,
+          "op": "<=",
+          "target": 12.0
+        },
+        "avg_hit_at_5": {
+          "status": "pass",
+          "actual": 0.885,
+          "op": ">=",
+          "target": 0.8
+        },
+        "avg_ndcg_at_5": {
+          "status": "pass",
+          "actual": 0.8462366896807788,
+          "op": ">=",
+          "target": 0.65
+        },
+        "avg_field_coverage": {
+          "status": "fail",
+          "actual": 0.5458333333333334,
+          "op": ">=",
+          "target": 0.55
+        },
+        "avg_grounded_token_ratio": {
+          "status": "pass",
+          "actual": 0.6328246029976371,
+          "op": ">=",
+          "target": 0.55
+        },
+        "decline_accuracy": {
+          "status": "missing",
+          "actual": null,
+          "op": ">=",
+          "target": 0.9
+        }
+      }
+    },
+    "similarity_k10": {
+      "gate_passed": false,
+      "pass_count": 4,
+      "total_count": 5,
+      "pass_ratio": 0.8,
+      "metrics": {
+        "p95_elapsed_time": {
+          "status": "pass",
+          "actual": 8.735166633129118,
+          "op": "<=",
+          "target": 12.0
+        },
+        "avg_hit_at_5": {
+          "status": "pass",
+          "actual": 0.88,
+          "op": ">=",
+          "target": 0.8
+        },
+        "avg_ndcg_at_5": {
+          "status": "pass",
+          "actual": 0.8129392530859608,
+          "op": ">=",
+          "target": 0.65
+        },
+        "avg_field_coverage": {
+          "status": "fail",
+          "actual": 0.5358333333333334,
+          "op": ">=",
+          "target": 0.55
+        },
+        "avg_grounded_token_ratio": {
+          "status": "pass",
+          "actual": 0.6492452632723701,
+          "op": ">=",
+          "target": 0.55
+        },
+        "decline_accuracy": {
+          "status": "missing",
+          "actual": null,
+          "op": ">=",
+          "target": 0.9
+        }
+      }
+    }
+  },
+  "best_config": "similarity_k5"
+}

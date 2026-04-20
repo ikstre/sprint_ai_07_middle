@@ -29,8 +29,8 @@
   - 네이티브 Windows는 `chroma + GPU 임베딩/리랭커` 조합이 안정적입니다.
 
 ## Python 버전 권장 매트릭스
-- 기본 RAG 서비스/평가: Python `3.14` 가능 (`requirements.txt`)
-- AutoRAG 실험: Python `3.11` 또는 `3.12` 권장 (`requirements-autorag.txt` 별도 설치 권장)
+- 기본 RAG 서비스/평가: 통합 환경 사용 (`requirements-integrated.txt`)
+- Gemma4 기반 AutoRAG 실험: Python `3.11` 또는 `3.12` 권장 (`requirements-gemma4.txt`)
 
 ## 장애 대응 포인트
 - 인덱스 누락/불일치: `scripts/index_documents.py` 재실행 후 컬렉션 카운트 확인.

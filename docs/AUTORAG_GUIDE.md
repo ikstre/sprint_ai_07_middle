@@ -8,11 +8,11 @@
 - 권장 파이썬 버전: `3.11` 또는 `3.12`
 - 설치:
 ```bash
-pip install -r requirements-autorag.txt
+pip install -r requirements-gemma4.txt
 ```
 
 참고:
-- AutoRAG는 메인 서비스 스택과 의존성 충돌 가능성이 있어 별도 환경을 권장합니다.
+- AutoRAG는 메인 서비스 스택과 분리된 `requirements-gemma4.txt` 환경 사용을 권장합니다.
 
 ## 1) 데이터 준비
 
@@ -92,8 +92,8 @@ python scripts/run_autorag_optimization.py \
 
 ### Scenario A (GPU 서버, 22GB VRAM — NVIDIA L4)
 
-> **주의**: kanana/midm은 transformers 5.x strict 검증 오류 → `PYTHONNOUSERSITE=1` 필수.  
-> Gemma4는 user-local transformers 5.x + vLLM 필요 → 별도 실행 후 결과 병합.
+> **주의**: kanana/midm은 transformers strict 검증 영향으로 `PYTHONNOUSERSITE=1` 실행을 권장합니다.  
+> Gemma4는 `AUTORAG_PYTHON`으로 연결한 별도 유저 환경에서 실행됩니다.
 
 ```bash
 # 사전 준비 — 모델 다운로드 (최초 1회)
@@ -119,13 +119,10 @@ PYTHONNOUSERSITE=1 python scripts/run_autorag_optimization.py \
   --config-path configs/autorag/local.yaml \
   --project-dir evaluation/autorag_benchmark_local
 
-# Step 2 — Gemma4-E4B 별도 실행 (user-local transformers 5.x + vLLM)
-bash scripts/run_gemma4_optimization.sh
-
-# Step 3 — 결과 병합 (CSV 기반 경로 기준)
-python scripts/merge_gemma4_results.py \
-  --main-dir evaluation/autorag_benchmark_csv \
-  --gemma4-dir evaluation/autorag_benchmark_gemma4
+# Gemma4 모델까지 포함한 통합 실행
+python scripts/run_pipeline.py \
+  --steps data,autorag \
+  --config-path configs/autorag/local.yaml
 ```
 
 Config 파일 목록:
@@ -135,7 +132,6 @@ Config 파일 목록:
 | `local_csv.yaml` | `data/autorag_csv/` | CSV 기반, **권장** (ground truth 정확, 평가 경로: `autorag_benchmark_csv`) |
 | `local_csv_pipeline.yaml` | `data/autorag_csv/` | 통합 파이프라인용 (run_pipeline.py가 자동 생성, 파인튜닝 모델 포함) |
 | `local.yaml` | `data/autorag/` | PDF/HWP 기반 대안 (retrieval_gt 토큰 매칭, 신뢰도 낮음) |
-| `local_gemma4.yaml` | `data/autorag/` | Gemma4-E4B 전용 별도 실행 (`bash scripts/run_gemma4_optimization.sh`) |
 | `local_pc.yaml` | `data/autorag/` | 로컬 PC (8GB GPU) |
 
 `local_csv.yaml` 주요 설정:
@@ -143,7 +139,7 @@ Config 파일 목록:
 - 프롬프트 3종: baseline / RFP 구조 명시 / 간결형
 - `top_k: [1,2,4,8,16]` — corpus 664개 규모에 최적화
 
-Scenario A 생성 모델 (`configs/autorag/local.yaml` + `local_gemma4.yaml`):
+Scenario A 생성 모델 (`configs/autorag/local.yaml`):
 
 | 모델 | 크기 | gpu_memory_utilization | 특이사항 |
 |------|------|------------------------|---------|
@@ -151,9 +147,9 @@ Scenario A 생성 모델 (`configs/autorag/local.yaml` + `local_gemma4.yaml`):
 | kanana-1.5-2.1b | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Midm-2.0-Mini | 4.4G | 0.70 | llama 계열, 한국어 특화 |
 | Gemma3-4B | 8.1G | 0.70 | max_model_len: 16384 |
-| Gemma4-E4B | 15G | 0.85 | BF16, dense, 별도 실행 |
+| Gemma4-E4B | 15G | 0.85 | Gemma4 전용 유저 환경에서 실행 |
 
-Scenario A 임베딩 모델 5종 비교 (`local.yaml` / `local_gemma4.yaml` vectordb):
+Scenario A 임베딩 모델 5종 비교 (`local.yaml` vectordb):
 
 | 이름 | 모델 경로 | 크기 | 특징 |
 |------|----------|------|------|

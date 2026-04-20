@@ -44,6 +44,8 @@ data/vectordb/
 !evaluation/b_chunk600_full_core_v2/**
 !evaluation/b_chunk800_full_core_v2/
 !evaluation/b_chunk800_full_core_v2/**
+evaluation/b_chunk600_full_core_v2/run.log
+evaluation/b_chunk800_full_core_v2/run.log
 
 # Finetuned model weights (large binary files — use NAS or shared storage)
 models/finetuned/

@@ -41,12 +41,17 @@ sprint_ai_07_middle/
 
 ## 설치
 
-```bash
-# 공용환경(shared env): B안 실행/평가 + A안 공통 작업
-pip install -r requirements-shared.txt
+requirements 파일 역할:
 
-# 유저환경(user env): A안 AutoRAG 전용
-pip install -r requirements-user.txt
+- `requirements-integrated.txt`: 통합 환경의 실제 의존성 정의
+- `requirements-gemma4.txt`: Gemma4 전용 유저 환경의 실제 의존성 정의
+
+```bash
+# 통합 환경(integrated env): B안 실행/평가 + A안 공통 작업
+pip install -r requirements-integrated.txt
+
+# Gemma4 전용 유저 환경(user env)
+pip install -r requirements-gemma4.txt
 
 # BM25 ko_okt 토크나이저 (Java 필요)
 sudo apt-get install -y default-jdk
@@ -55,14 +60,14 @@ sudo apt-get install -y default-jdk
 권장 환경 분리:
 
 ```bash
-# 1) shared env
+# 1) integrated env
 conda activate sprint_env
-pip install -r requirements-shared.txt
+pip install -r requirements-integrated.txt
 
-# 2) user env (A안 AutoRAG 전용)
-conda create -n autorag python=3.11
-conda activate autorag
-pip install -r requirements-user.txt
+# 2) gemma4 user env
+conda create -n gemma4_env python=3.11
+conda activate gemma4_env
+pip install -r requirements-gemma4.txt
 ```
 
 `.env` 설정:
@@ -70,14 +75,14 @@ pip install -r requirements-user.txt
 ```bash
 OPENAI_API_KEY=sk-...
 HF_TOKEN=hf_...
-AUTORAG_PYTHON=/path/to/envs/autorag/bin/python
+AUTORAG_PYTHON=/path/to/envs/gemma4_env/bin/python
 # 서버 경로 (기본: /srv/shared_data)
 # SRV_DATA_DIR=/srv/shared_data
 ```
 
-- `shared env`는 `B안` 실행/평가와 `A안`의 인덱싱·파인튜닝 같은 공통 작업에 사용합니다.
-- `user env`는 `AutoRAG`만 담당합니다. `scripts/run_autorag_optimization.py`, `scripts/run_autorag_api.py`, `scripts/run_autorag_web.py`는 `AUTORAG_PYTHON`이 설정돼 있으면 해당 인터프리터로 자동 전환합니다.
-- `requirements.txt` / `requirements-autorag.txt`는 실제 의존성 파일이고, `requirements-shared.txt` / `requirements-user.txt`는 역할별 진입점입니다.
+- `integrated env`는 `B안` 실행/평가와 `A안`의 인덱싱·파인튜닝 같은 공통 작업을 모두 포함합니다.
+- `gemma4 env`는 Gemma4 기반 AutoRAG 실험 전용 유저 환경입니다. `scripts/run_autorag_optimization.py`, `scripts/run_autorag_api.py`, `scripts/run_autorag_web.py`는 `AUTORAG_PYTHON`이 설정돼 있으면 해당 인터프리터로 자동 전환합니다.
+- 설치 문서와 팀 커뮤니케이션에서는 `requirements-integrated.txt`, `requirements-gemma4.txt` 두 파일만 사용합니다.
 
 ---
 
