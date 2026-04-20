@@ -67,6 +67,7 @@ def run_single_config(
     use_llm_judge: bool = True,
     use_bertscore: bool = False,
     collection_name: str = "rfp_chunk600",
+    skip_keys: set | None = None,
 ):
     print(f"\n{'=' * 56}")
     print(f"config: {label}")
@@ -87,6 +88,8 @@ def run_single_config(
     df.to_csv(output_dir / f"eval_{label}.csv", index=False, encoding="utf-8-sig")
 
     summary = evaluator.summary_report(df)
+    if skip_keys:
+        summary = {k: v for k, v in summary.items() if k not in skip_keys}
     with open(output_dir / f"summary_{label}.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -358,6 +361,8 @@ def main():
         {"label": "similarity_k10", "kwargs": {"retrieval_method": "similarity", "retrieval_top_k": 10}},
     ]
 
+    skip_keys = {"avg_total_tokens"} if args.scenario == "A" else set()
+
     all_summaries = {}
     for cfg in configs:
         config = Config(
@@ -374,14 +379,14 @@ def main():
             use_llm_judge=use_llm_judge,
             use_bertscore=use_bertscore,
             collection_name=collection_name,
+            skip_keys=skip_keys,
         )
         save_mode_csv(df=df, output_dir=output_dir, label=cfg["label"], mode=args.mode)
 
         # Save a concise mode-specific summary file.
         mode_summary = {"mode": args.mode, "config": cfg["label"]}
-        skip_keys = {"avg_total_tokens"} if args.scenario == "A" else set()
         for key in CORE_METRICS + (DETAILED_EXTRA_METRICS if args.mode == "detailed" else []):
-            if key in summary and key not in skip_keys:
+            if key in summary:
                 mode_summary[key] = summary[key]
         with open(output_dir / f"summary_{cfg['label']}_{args.mode}.json", "w", encoding="utf-8") as f:
             json.dump(mode_summary, f, ensure_ascii=False, indent=2)
