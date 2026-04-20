@@ -39,6 +39,7 @@ RAG_PROMPT_TEMPLATE = """아래 컨텍스트를 근거로 질문에 답변하세
 - 금액, 일정, 제출방식, 요구사항은 문서에 나온 표현을 그대로 우선 사용
 - 숫자, 날짜, 금액, 기간, 제출방식은 요약하거나 환산하지 말고 문서 표현을 그대로 복사
 - 질문에 포함된 핵심 항목명은 가능한 한 답변 소제목 또는 본문에 그대로 포함
+- 근거 문서를 언급할 때는 `문서 1`, `문서 2` 같은 내부 번호만 쓰지 말고, 발주기관/사업명/파일명 중 확인 가능한 식별 정보를 함께 적기
 """
 
 
@@ -269,12 +270,23 @@ class RAGGenerator:
 
         return "\n".join(lines) if lines else "문서에서 확인된 필드 후보 없음"
 
+    @staticmethod
+    def _build_doc_label(index: int, meta: dict) -> str:
+        parts = [f"문서 {index}"]
+        if meta.get("발주기관") or meta.get("발주 기관"):
+            parts.append(meta.get("발주기관") or meta.get("발주 기관"))
+        if meta.get("사업명"):
+            parts.append(meta["사업명"])
+        if meta.get("filename"):
+            parts.append(f"파일명 {meta['filename']}")
+        return " | ".join(parts)
+
     def _build_context(self, retrieved_docs: list[dict]) -> str:
         context_parts = []
         max_chars = max(0, getattr(self.config, "max_context_chars_per_doc", 0))
         for i, doc in enumerate(retrieved_docs, 1):
             meta = doc.get("metadata", {})
-            header_lines = [f"[문서 {i}]"]
+            header_lines = [f"[{self._build_doc_label(i, meta)}]"]
             if meta.get("발주기관") or meta.get("발주 기관"):
                 header_lines.append(f"발주기관: {meta.get('발주기관') or meta.get('발주 기관')}")
             if meta.get("사업명"):

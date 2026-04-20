@@ -25,6 +25,7 @@
 """
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -33,9 +34,15 @@ load_dotenv()
 SRV_DATA_DIR: str = os.getenv("SRV_DATA_DIR", "/srv/shared_data")
 
 # ── 데이터셋 ───────────────────────────────────────────────────────────────
+# 프로젝트 로컬 CSV (재파싱된 본문 포함)가 있으면 우선 사용하고,
+# 없으면 공용 서버의 구버전 CSV로 fallback 한다.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_METADATA_CSV = _PROJECT_ROOT / "data" / "data_list_cleaned.csv"
 METADATA_CSV: str = os.getenv(
     "METADATA_CSV",
-    f"{SRV_DATA_DIR}/datasets/data_list_cleaned.csv",
+    str(_LOCAL_METADATA_CSV)
+    if _LOCAL_METADATA_CSV.exists()
+    else f"{SRV_DATA_DIR}/datasets/data_list_cleaned.csv",
 )
 PDF_DIR: str = os.getenv("PDF_DIR", f"{SRV_DATA_DIR}/pdf")
 
