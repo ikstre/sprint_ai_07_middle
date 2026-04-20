@@ -1,4 +1,4 @@
-# sprint_ai_07_middle
+# 입찰메이트 기술 1팀 RAG시스템 구현 프로젝트
 
 기업/공공 RFP 문서를 대상으로 한 RAG 시스템 프로젝트입니다.
 
@@ -305,6 +305,13 @@ python scripts/check_release_gate.py
 - A안에서 `--mode detailed` 또는 `--judge on`을 쓰면 judge 단계는 여전히 OpenAI API를 사용합니다.
 - `--chunk-sizes`를 쓰면 각 크기별 평가를 별도 하위 디렉터리에 병렬 실행하고, 로그는 각 `run.log`에 저장합니다.
 
+최신 B안 core 병렬 재평가 요약:
+- 결과 경로: `evaluation/parallel_b_fieldcov/`
+- `800 similarity_k5`: p95 `8.85s`, hit@5 `0.88`, field_coverage `0.57`, grounded `0.561`
+- `1000 similarity_k5`, `1200 similarity_k5`도 core gate PASS
+- `600`은 `hybrid_k5`, `similarity_k10`에서 PASS
+- 운영 기본값은 여전히 `rfp_chunk800 + similarity_k5`
+
 ---
 
 ## 컬렉션 목록
@@ -399,7 +406,7 @@ python scripts/check_release_gate.py
 
 ### B안 — top-k 검색 결과에 여러 RFP 문서 혼합
 - 동일 출처(발주기관+사업명) 청크를 최대 2개로 제한하는 `max_chunks_per_source` 옵션이 기본 적용됩니다.
-- 단일 문서 질문 정확도가 낮으면 `rfp_chunk600` → `rfp_chunk800`으로 컬렉션 변경을 시도하세요.
+- 최신 재평가 기준 운영 기본값은 `rfp_chunk800`입니다. 필요 시 `rfp_chunk1000`, `rfp_chunk1200`도 비교 후보로 사용할 수 있습니다.
 
 ### B안 — LLM judge 응답 없음 또는 JSON 파싱 실패
 - gpt-5-nano는 내부 추론 예산이 필요해 `max_completion_tokens=4000`으로 자동 설정됩니다.
