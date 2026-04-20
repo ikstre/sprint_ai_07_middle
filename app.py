@@ -126,6 +126,10 @@ with st.sidebar:
     top_k = st.slider("Top-K (검색 결과 수)", 3, 15, 5)
     use_reranker = st.checkbox("Re-ranking 사용", value=False)
     use_multi_query = st.checkbox("Multi-Query 사용", value=False)
+    if use_reranker:
+        st.caption("리랭커는 FlagEmbedding 기반입니다. CPU에서는 느려질 수 있습니다.")
+    if use_multi_query and scenario_key == "A":
+        st.caption("A안에서는 LLM 멀티쿼리 대신 규칙 기반 쿼리 확장을 사용합니다.")
 
     if scenario_key == "B":
         st.divider()
