@@ -1,0 +1,43 @@
+{
+  "total_questions": 200,
+  "avg_elapsed_time": 4.800554077625275,
+  "p50_elapsed_time": 4.326244235038757,
+  "p95_elapsed_time": 8.720879924297332,
+  "max_elapsed_time": 38.41266965866089,
+  "avg_num_retrieved": 7.415,
+  "avg_hit_at_1": 0.82,
+  "avg_hit_at_3": 0.875,
+  "avg_hit_at_5": 0.88,
+  "avg_mrr": 0.8474642857142857,
+  "avg_ndcg_at_5": 0.8126802393268074,
+  "avg_precision_at_5": 0.6190000000000001,
+  "avg_recall_proxy": 0.895,
+  "avg_keyword_recall": 0.1991666666666667,
+  "avg_field_coverage": 0.5233333333333333,
+  "avg_rougeL_f1": 0.06424660744995019,
+  "avg_meteor": 0.06002390459601715,
+  "avg_grounded_token_ratio": 0.632857477560711,
+  "avg_hallucination_risk_proxy": 0.367142522439289,
+  "avg_prompt_tokens": 3044.265,
+  "avg_completion_tokens": 564.66,
+  "avg_total_tokens": 3608.925,
+  "by_category": {
+    "single_doc": {
+      "count": 100,
+      "avg_elapsed_time": 4.974944548606873,
+      "avg_hit_at_5": 0.9,
+      "avg_ndcg_at_5": 0.7684721559990381,
+      "avg_keyword_recall": 0.22166666666666665,
+      "avg_field_coverage": 0.5233333333333333,
+      "avg_grounded_token_ratio": 0.48986005826089674
+    },
+    "follow_up": {
+      "count": 100,
+      "avg_elapsed_time": 4.626163606643677,
+      "avg_hit_at_5": 0.86,
+      "avg_ndcg_at_5": 0.856888322654577,
+      "avg_keyword_recall": 0.17666666666666664,
+      "avg_grounded_token_ratio": 0.7758548968605252
+    }
+  }
+}

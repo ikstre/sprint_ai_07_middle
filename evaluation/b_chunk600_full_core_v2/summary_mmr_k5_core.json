@@ -1,0 +1,13 @@
+{
+  "mode": "core",
+  "config": "mmr_k5",
+  "avg_elapsed_time": 4.752553045749664,
+  "p50_elapsed_time": 4.2589592933654785,
+  "p95_elapsed_time": 7.795008051395416,
+  "avg_hit_at_5": 0.88,
+  "avg_ndcg_at_5": 0.8360615611365114,
+  "avg_keyword_recall": 0.1775,
+  "avg_field_coverage": 0.5458333333333334,
+  "avg_grounded_token_ratio": 0.6201815418427171,
+  "avg_total_tokens": 2277.22
+}
