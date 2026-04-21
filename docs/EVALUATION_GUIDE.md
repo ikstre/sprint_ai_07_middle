@@ -21,6 +21,18 @@
 
 ## 최신 core 결과 요약
 
+- 최신 B안 병렬 core 재평가 결과는 `evaluation/parallel_b_fieldcov/`에 저장되었습니다.
+- 최신 A안 chunk800 전체 재실행 결과는 `evaluation/a_chunk800_full_core/`에 저장되었습니다.
+- chunk별 best gate 기준:
+  - `600`: `hybrid_k5` PASS, `similarity_k10` PASS
+  - `800`: 4개 config 전부 PASS
+  - `1000`: 4개 config 전부 PASS
+  - `1200`: `mmr_k5`만 FAIL, 나머지 PASS
+- 운영 기본 추천값은 여전히 `rfp_chunk800 + similarity_k5`입니다.
+- 대표 수치:
+  - `800 similarity_k5`: p95 `8.85s`, hit@5 `0.88`, nDCG@5 `0.840`, field_coverage `0.57`, grounded `0.561`
+  - `1000 similarity_k5`: p95 `9.04s`, field_coverage `0.562`, grounded `0.568`
+  - `1200 similarity_k5`: p95 `8.46s`, field_coverage `0.556`, grounded `0.560`
 - 최신 B안 core 재평가 결과는 `evaluation/b_chunk{600,800,1000,1200}_full_core/`에 저장되었습니다.
 - `similarity_k5` 기준 대표 수치:
   - `600`: p95 `20.27s`, hit@5 `0.900`, nDCG@5 `0.804`, field_coverage `0.596`, grounded `0.552`
@@ -37,6 +49,24 @@
 | 800 | `similarity_k5` | 4/5 | 19.55 | 0.900 | 0.584 | 0.588 |
 | 1000 | `similarity_k5` | 4/5 | 18.69 | 0.905 | 0.586 | 0.557 |
 | 1200 | `similarity_k5` | 4/5 | 19.70 | 0.905 | 0.608 | 0.590 |
+
+### 최신 A안 chunk800 core 결과 (`2026-04-21`)
+
+- 실행 컬렉션: `rfp_chunk800_a`
+- 출력 경로: `evaluation/a_chunk800_full_core/`
+- 요약: 4개 retrieval config 모두 검색/grounding/속도는 기준을 통과했지만, `field_coverage`가 0.55에 못 미쳐 gate는 전부 `4/5`였습니다.
+
+| config | gate | p95(s) | hit@5 | nDCG@5 | field_cov | grounded |
+|---|---:|---:|---:|---:|---:|---:|
+| `similarity_k5` | 4/5 | 7.60 | 0.865 | 0.838 | 0.497 | 0.627 |
+| `mmr_k5` | 4/5 | 7.33 | 0.875 | 0.825 | 0.516 | 0.636 |
+| `hybrid_k5` | 4/5 | **6.99** | **0.875** | **0.844** | 0.499 | 0.637 |
+| `similarity_k10` | 4/5 | 7.71 | 0.865 | 0.817 | 0.509 | **0.665** |
+
+| category | count | similarity_k5 hit@5 | similarity_k5 grounded | similarity_k10 hit@5 | similarity_k10 grounded |
+|---|---:|---:|---:|---:|---:|
+| `single_doc` | 100 | 0.87 | 0.493 | 0.87 | 0.550 |
+| `follow_up` | 100 | 0.86 | 0.761 | 0.86 | 0.781 |
 
 ## 실행 커맨드
 - 릴리즈 게이트 원커맨드 (권장)

@@ -143,6 +143,28 @@
 
 > Gemma4 확장 trial은 GPU 메모리 제약으로 별도 환경에서 실행 후 `scripts/merge_gemma4_results.py`로 메인 trial에 병합.
 
+### 4.4 A안 질문지 기반 core 재평가 (chunk800, 2026-04-21)
+
+실행 경로: `evaluation/a_chunk800_full_core/`  
+평가 컬렉션: `rfp_chunk800_a`
+
+| config | gate | p95(s) | hit@5 | nDCG@5 | field_cov | grounded |
+|---|---:|---:|---:|---:|---:|---:|
+| similarity_k5 | 4/5 | 7.60 | 0.865 | 0.838 | 0.497 | 0.627 |
+| mmr_k5 | 4/5 | 7.33 | 0.875 | 0.825 | 0.516 | 0.636 |
+| hybrid_k5 | 4/5 | **6.99** | **0.875** | **0.844** | 0.499 | 0.637 |
+| similarity_k10 | 4/5 | 7.71 | 0.865 | 0.817 | 0.509 | **0.665** |
+
+| category | count | similarity_k5 hit@5 | similarity_k5 grounded | similarity_k10 hit@5 | similarity_k10 grounded |
+|---|---:|---:|---:|---:|---:|
+| single_doc | 100 | 0.87 | 0.493 | 0.87 | 0.550 |
+| follow_up | 100 | 0.86 | 0.761 | 0.86 | 0.781 |
+
+- 최신 A안 재평가에서는 4개 config 모두 `p95_elapsed_time`, `hit@5`, `nDCG@5`, `grounded_token_ratio`를 충족했습니다.
+- 반면 `avg_field_coverage >= 0.55` 조건은 모든 config가 미달하여 release gate는 전부 `4/5`였습니다.
+- 운영 관점에서는 `hybrid_k5`가 가장 빠른 p95와 최고 nDCG를 보였고, `similarity_k10`은 grounding이 가장 높았습니다.
+
+### 4.5 카테고리별 성능 (chunk800 similarity_k5)
 ### 4.4 카테고리별 성능
 
 - 카테고리별 세부 표는 최신 재생성 코퍼스 기준으로 다시 산출하지 않았으므로 본 보고서에서는 제외합니다.
@@ -173,6 +195,10 @@
 - 임베딩: `BGE-m3-ko` (1024-dim, f1/nDCG=0.9420)
 - 생성: **Gemma3 파인튜닝** (LoRA, max_tokens=256, temp=0.9, meteor=0.3080)
 - 프롬프트: Fstring 3단계 RFP 답변 프롬프트
+
+최신 질문지 기반 재평가 관점:
+- 검색 config 후보는 `hybrid_k5`와 `similarity_k10`이 상대적으로 우세했습니다.
+- 다만 field coverage 보강 전까지는 A안도 운영 게이트 PASS 상태로 보기 어렵습니다.
 
 ### 5.2 개선 이력 (PR #26~#36)
 

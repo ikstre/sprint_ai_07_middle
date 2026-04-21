@@ -372,6 +372,23 @@ python scripts/check_release_gate.py
 | EXAONE-Deep-7.8B (파인튜닝) | 15G | 0.70 | trust_remote_code |
 | Gemma4-E4B (파인튜닝) | 15G | 0.70 | QLoRA 적용 |
 
+### 최신 A안 재실행 요약 (`2026-04-21`)
+
+| 구분 | 경로 | 완료 시각 | 핵심 결과 |
+|------|------|-----------|-----------|
+| AutoRAG 메인 trial | `evaluation/autorag_benchmark_csv/0` | 2026-04-21 08:09 KST | retrieval best: `HybridRRF(top_k=8, weight=4.0)` |
+| AutoRAG Gemma 확장 trial | `evaluation/autorag_benchmark_csv_gemma/0` | 2026-04-21 12:34 KST | generator best: `models/finetuned/gemma4/final` |
+| 질문지 기반 core 평가 | `evaluation/a_chunk800_full_core/` | 2026-04-21 13:25 KST | 4개 config 모두 gate `4/5` |
+
+| config | p95(s) | hit@5 | nDCG@5 | field_cov | grounded | gate |
+|------|---:|---:|---:|---:|---:|---:|
+| similarity_k5 | 7.60 | 0.865 | 0.838 | 0.497 | 0.627 | FAIL (4/5) |
+| mmr_k5 | 7.33 | 0.875 | 0.825 | 0.516 | 0.636 | FAIL (4/5) |
+| hybrid_k5 | **6.99** | **0.875** | **0.844** | 0.499 | 0.637 | FAIL (4/5) |
+| similarity_k10 | 7.71 | 0.865 | 0.817 | 0.509 | **0.665** | FAIL (4/5) |
+
+> 이번 A안 `chunk_size=800` 재실행에서는 속도·검색 품질은 모두 기준을 넘었지만, `avg_field_coverage >= 0.55`를 모든 config가 충족하지 못해 gate는 4/5에 머물렀습니다.
+
 ### 임베딩 모델 (AutoRAG 5종 비교)
 
 | 이름 | 서버 경로 | 차원 |
