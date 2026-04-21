@@ -317,16 +317,19 @@ python scripts/check_release_gate.py
 주의:
 - `run_evaluation.py`는 Chroma 컬렉션을 대상으로 하는 질문지 기반 서비스 평가입니다.
 - 저장소에 커밋된 `evaluation/autorag_benchmark_csv`, `evaluation/autorag_benchmark_csv_gemma` 는 A안 AutoRAG 벤치마크 결과이며, `run_evaluation.py`의 출력이 아닙니다.
-- 현재 저장소에 가공 청크가 포함된 A안 기준 산출물은 `rfp_chunk600_a`, `rfp_chunk800_a` 계열이며, 현재 운영 기본값은 `rfp_chunk800_a`입니다.
+- 현재 저장소에 가공 청크가 포함된 A안 기준 산출물은 `rfp_chunk600_a`, `rfp_chunk800_a`, `rfp_chunk1000_a`, `rfp_chunk1200_a` 계열입니다.
 - A안에서 `--mode detailed` 또는 `--judge on`을 쓰면 judge 단계는 여전히 OpenAI API를 사용합니다.
 - `--chunk-sizes`를 쓰면 각 크기별 평가를 별도 하위 디렉터리에 병렬 실행하고, 로그는 각 `run.log`에 저장합니다.
 
-최신 B안 core 병렬 재평가 요약:
-- 결과 경로: `evaluation/parallel_b_fieldcov/`
-- `800 similarity_k5`: p95 `8.85s`, hit@5 `0.88`, field_coverage `0.57`, grounded `0.561`
-- `1000 similarity_k5`, `1200 similarity_k5`도 core gate PASS
-- `600`은 `hybrid_k5`, `similarity_k10`에서 PASS
-- 운영 기본값은 여전히 `rfp_chunk800 + similarity_k5`
+최신 B안 core 재평가 요약:
+- 결과 경로: `evaluation/b_chunk{600,800,1000,1200}_full_core/`
+- `similarity_k5` 기준 대표 수치:
+  - `600`: p95 `20.27s`, hit@5 `0.900`, field_coverage `0.596`, grounded `0.552`
+  - `800`: p95 `19.55s`, hit@5 `0.900`, field_coverage `0.584`, grounded `0.588`
+  - `1000`: p95 `18.69s`, hit@5 `0.905`, field_coverage `0.586`, grounded `0.557`
+  - `1200`: p95 `19.70s`, hit@5 `0.905`, field_coverage `0.608`, grounded `0.590`
+- 최신 재평가에서는 4개 chunk 모두 품질 지표는 기준 이상이지만, `p95_elapsed_time`와 `decline_accuracy missing` 때문에 core gate는 모두 미통과입니다.
+- 따라서 현재는 특정 chunk를 “최종 운영 기본값”으로 확정하기보다, 속도 개선 또는 gate 기준 재정의가 먼저 필요한 상태입니다.
 
 ---
 
@@ -449,7 +452,7 @@ python scripts/check_release_gate.py
 
 ### B안 — top-k 검색 결과에 여러 RFP 문서 혼합
 - 동일 출처(발주기관+사업명) 청크를 최대 2개로 제한하는 `max_chunks_per_source` 옵션이 기본 적용됩니다.
-- 최신 재평가 기준 운영 기본값은 `rfp_chunk800`입니다. 필요 시 `rfp_chunk1000`, `rfp_chunk1200`도 비교 후보로 사용할 수 있습니다.
+- 최신 재평가 기준에서는 4개 chunk 모두 품질 지표는 기준 이상이었지만 시간 gate는 미통과였습니다. 따라서 현재는 특정 chunk를 운영 기본값으로 확정하지 않고, `rfp_chunk800`, `rfp_chunk1000`, `rfp_chunk1200`을 비교 후보로 유지하는 것이 적절합니다.
 
 ### B안 — LLM judge 응답 없음 또는 JSON 파싱 실패
 - gpt-5-nano는 내부 추론 예산이 필요해 `max_completion_tokens=4000`으로 자동 설정됩니다.

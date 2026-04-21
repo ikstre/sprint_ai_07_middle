@@ -57,7 +57,7 @@
 
 ### 데이터셋
 
-- **문서 원천**: `/srv/shared_data/datasets/data_list_cleaned.csv` 기반 RFP 집합
+- **문서 원천**: 로컬 재파싱본 `data/data_list_cleaned.csv` 기반 RFP 집합
 - **청크 크기 실험**: 600 / 800 / 1000 / 1200 자
 - **평가 질문지**: 총 200문항
   - `single_doc` 100문항 (단일 RFP 질의)
@@ -91,27 +91,28 @@
 
 | chunk | p95(s) | hit@5 | nDCG@5 | field_cov | grounded | gate |
 |---|---:|---:|---:|---:|---:|---:|
-| 600 | 8.56 | 0.880 | 0.844 | 0.569 | 0.547 | FAIL |
-| **800** | **8.85** | **0.880** | **0.840** | **0.570** | **0.561** | **PASS** (5/5) |
-| 1000 | 9.04 | 0.860 | 0.824 | 0.562 | 0.568 | PASS (5/5) |
-| 1200 | 8.46 | 0.865 | 0.832 | 0.556 | 0.560 | PASS (5/5) |
+| 600 | 20.27 | 0.900 | 0.804 | 0.596 | 0.552 | FAIL (4/5) |
+| 800 | 19.55 | 0.900 | 0.813 | 0.584 | 0.588 | FAIL (4/5) |
+| 1000 | 18.69 | 0.905 | 0.823 | 0.586 | 0.557 | FAIL (4/5) |
+| **1200** | **19.70** | **0.905** | 0.802 | **0.608** | **0.590** | FAIL (4/5) |
 
-> `decline_accuracy`는 질문지에 거절 유형이 없어 모든 config에서 `missing`. gate 계산에서 제외됩니다.
-> 최신 재평가 기준 산출물 경로: `evaluation/parallel_b_fieldcov/b_chunk*_full_core`
+> `decline_accuracy`는 질문지에 거절 유형이 없어 모든 config에서 `missing`입니다.
+> 최신 재평가 기준 산출물 경로: `evaluation/b_chunk*_full_core`
+> 4개 chunk 모두 품질 지표는 기준 이상이었지만, `p95_elapsed_time <= 12.0s`를 충족하지 못해 gate는 모두 미통과였습니다.
 
 ### 4.2 4개 retrieval config 비교 (chunk800 기준)
 
 | config | p95(s) | hit@5 | nDCG@5 | field_cov | grounded | prompt_tokens |
 |---|---:|---:|---:|---:|---:|---:|
-| **similarity_k5** | **8.85** | 0.880 | 0.840 | **0.570** | 0.561 | 3,073 |
-| mmr_k5 | 10.92 | 0.860 | 0.827 | 0.558 | 0.560 | 2,901 |
-| hybrid_k5 | 10.75 | **0.885** | **0.846** | 0.562 | 0.556 | 3,155 |
-| similarity_k10 | 10.60 | 0.880 | 0.813 | 0.567 | **0.578** | 4,425 |
+| similarity_k5 | 19.55 | 0.900 | 0.813 | 0.584 | 0.588 | 4,273 |
+| mmr_k5 | 19.05 | 0.905 | 0.813 | 0.596 | 0.579 | 4,051 |
+| **hybrid_k5** | 19.41 | **0.920** | **0.835** | 0.582 | 0.574 | 4,362 |
+| similarity_k10 | 19.55 | 0.900 | 0.734 | **0.623** | **0.608** | 6,441 |
 
-- `similarity_k5`: 가장 빠르고 field coverage도 가장 높아 운영 기본값으로 유지하기 적합
-- `hybrid_k5`: hit@5와 nDCG@5는 최고지만 latency가 더 길고 grounded는 약간 낮음
-- `similarity_k10`: grounded는 가장 높지만 토큰 비용이 크게 증가해 운영 효율은 떨어짐
-- `mmr_k5`: 최신 재평가에서는 gate는 통과했지만 속도와 품질 모두 우위가 뚜렷하지 않음
+- `similarity_k5`: best_config로 선택됐지만, 시간 기준 미달로 운영 기본값 확정은 보류
+- `hybrid_k5`: hit@5와 nDCG@5는 가장 좋지만 latency는 비슷하게 높음
+- `similarity_k10`: field coverage와 grounded는 높지만 토큰 비용이 크게 증가
+- `mmr_k5`: 품질은 무난하지만 latency 개선 이점이 뚜렷하지 않음
 
 ### 4.3 A안 AutoRAG 자동 최적화 결과
 
@@ -164,14 +165,11 @@
 - 운영 관점에서는 `hybrid_k5`가 가장 빠른 p95와 최고 nDCG를 보였고, `similarity_k10`은 grounding이 가장 높았습니다.
 
 ### 4.5 카테고리별 성능 (chunk800 similarity_k5)
+### 4.4 카테고리별 성능
 
-| 카테고리 | count | hit@5 | nDCG@5 | field_cov | grounded |
-|---|---:|---:|---:|---:|---:|
-| single_doc | 100 | 0.90 | 0.824 | 0.551 | 0.441 |
-| follow_up | 100 | 0.86 | 0.856 | — | 0.782 |
-
-- `follow_up` 질문에서 `grounded_token_ratio`가 크게 상승 — 팔로우업이 메인 질문 컨텍스트를 재활용하기 때문
-- `single_doc`의 grounded가 낮은 이유: LLM이 문서 외 일반 지식을 혼입하는 경향
+- 카테고리별 세부 표는 최신 재생성 코퍼스 기준으로 다시 산출하지 않았으므로 본 보고서에서는 제외합니다.
+- 현재 최신 해석은 전체 core 재평가 결과(`evaluation/b_chunk*_full_core`)를 기준으로 합니다.
+- 후속 분석이 필요하면 동일 코퍼스/인덱스 기준으로 `single_doc`, `follow_up`, `out_of_scope`를 다시 분리 집계해야 합니다.
 
 ---
 
@@ -179,17 +177,17 @@
 
 ### 5.1 채택 구성
 
-**B안 권장 설정**
-- 청크 크기: **800자** (속도·품질·토큰 비용 균형이 가장 안정적)
-- retrieval: `similarity_k5` (속도·품질 균형)
+**B안 현재 권장 해석**
+- 청크 크기: 확정 보류
+- retrieval: `similarity_k5`가 4개 chunk 모두 best_config
 - 임베딩: `text-embedding-3-small` (512-dim 축소)
 - 생성: `gpt-5-mini` (복잡 질문) + `gpt-5-nano` (단순 질문 라우팅)
 
-최신 병렬 재평가 기준:
-- 600: `hybrid_k5`, `similarity_k10` PASS
-- 800: 4개 config 전부 PASS
-- 1000: 4개 config 전부 PASS
-- 1200: `mmr_k5`만 FAIL, 나머지 PASS
+최신 전체 재평가 기준:
+- 4개 chunk 모두 `similarity_k5`가 best_config
+- 품질 지표는 전반적으로 기준 이상
+- 그러나 `p95_elapsed_time`와 `decline_accuracy missing` 때문에 core gate는 모두 미통과
+- 따라서 운영 기본값을 재확정하기 전에 시간 최적화 또는 gate 정책 재정비가 필요
 
 **A안 권장 설정**
 - 청크 크기: 800자
@@ -216,12 +214,11 @@
 
 ### 5.3 보류·미충족 구성
 
-**600 similarity_k5 / 600 mmr_k5 / 1200 mmr_k5**
-- 최신 재평가에서도 일부 config는 gate 미달이 남아 있습니다.
-- 600 `similarity_k5`: `avg_grounded_token_ratio` 0.547로 임계값 0.55 소폭 미달
-- 600 `mmr_k5`: `avg_grounded_token_ratio` 0.546으로 미달
-- 1200 `mmr_k5`: `avg_field_coverage` 0.547로 미달
-- 대응 계획: 운영 기본값은 계속 `similarity_k5@800`으로 두고, 보조 후보는 `hybrid_k5@600`, `similarity_k5@1000`, `similarity_k5@1200` 위주로 비교 유지
+**최신 재평가 기준 B안 전체**
+- 4개 chunk 모두 시간 게이트 미달이 남아 있습니다.
+- 직접 원인은 `p95_elapsed_time` 18~20초대 상승입니다.
+- 품질 자체는 유지 또는 개선됐기 때문에, 현재 병목은 검색/생성 시간 쪽으로 보는 것이 맞습니다.
+- 대응 계획: 운영 기본값 확정 전에 latency 재측정과 병목 분석을 우선 수행
 
 **`decline_accuracy` — missing**
 - 원인: 현재 질문지(single_doc / follow_up)에 거절 유형 문항이 없음
@@ -260,7 +257,7 @@
 | 컬렉션명 | 시나리오 | 임베딩 | chunk_size |
 |---|---|---|---|
 | `rfp_chunk600` / `rfp_chunk800` / `rfp_chunk1000` / `rfp_chunk1200` | B | text-embedding-3-small (512-dim) | 600~1200 |
-| `rfp_chunk600_a` / `rfp_chunk800_a` | A | BGE-m3-ko (1024-dim) | 600 / 800 |
+| `rfp_chunk600_a` / `rfp_chunk800_a` / `rfp_chunk1000_a` / `rfp_chunk1200_a` | A | BGE-m3-ko (1024-dim) | 600~1200 |
 
 ### 8.2 AutoRAG 내장 패치
 

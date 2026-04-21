@@ -33,13 +33,22 @@
   - `800 similarity_k5`: p95 `8.85s`, hit@5 `0.88`, nDCG@5 `0.840`, field_coverage `0.57`, grounded `0.561`
   - `1000 similarity_k5`: p95 `9.04s`, field_coverage `0.562`, grounded `0.568`
   - `1200 similarity_k5`: p95 `8.46s`, field_coverage `0.556`, grounded `0.560`
+- 최신 B안 core 재평가 결과는 `evaluation/b_chunk{600,800,1000,1200}_full_core/`에 저장되었습니다.
+- `similarity_k5` 기준 대표 수치:
+  - `600`: p95 `20.27s`, hit@5 `0.900`, nDCG@5 `0.804`, field_coverage `0.596`, grounded `0.552`
+  - `800`: p95 `19.55s`, hit@5 `0.900`, nDCG@5 `0.813`, field_coverage `0.584`, grounded `0.588`
+  - `1000`: p95 `18.69s`, hit@5 `0.905`, nDCG@5 `0.823`, field_coverage `0.586`, grounded `0.557`
+  - `1200`: p95 `19.70s`, hit@5 `0.905`, nDCG@5 `0.802`, field_coverage `0.608`, grounded `0.590`
+- 4개 chunk 모두 `avg_hit_at_5`, `avg_ndcg_at_5`, `avg_field_coverage`, `avg_grounded_token_ratio`는 기준을 넘겼습니다.
+- 하지만 `p95_elapsed_time <= 12.0s` 기준을 모두 넘겼고, `decline_accuracy`는 질문지 구성상 `missing`이라 현재 core gate는 모두 미통과입니다.
+- 따라서 최신 기준에서는 특정 chunk를 최종 운영 기본값으로 확정하기보다, 시간 지표 최적화와 거절 질문셋 보완이 먼저 필요합니다.
 
 | chunk | best_config | gate | p95(s) | hit@5 | field_cov | grounded |
 |---|---|---:|---:|---:|---:|---:|
-| 600 | `hybrid_k5` | 5/5 | 11.54 | 0.875 | 0.562 | 0.562 |
-| 800 | `similarity_k5` | 5/5 | 8.85 | 0.880 | 0.570 | 0.561 |
-| 1000 | `similarity_k5` | 5/5 | 9.04 | 0.860 | 0.562 | 0.568 |
-| 1200 | `similarity_k5` | 5/5 | 8.46 | 0.865 | 0.556 | 0.560 |
+| 600 | `similarity_k5` | 4/5 | 20.27 | 0.900 | 0.596 | 0.552 |
+| 800 | `similarity_k5` | 4/5 | 19.55 | 0.900 | 0.584 | 0.588 |
+| 1000 | `similarity_k5` | 4/5 | 18.69 | 0.905 | 0.586 | 0.557 |
+| 1200 | `similarity_k5` | 4/5 | 19.70 | 0.905 | 0.608 | 0.590 |
 
 ### 최신 A안 chunk800 core 결과 (`2026-04-21`)
 
@@ -102,7 +111,7 @@ python scripts/run_evaluation.py \
   - 각 크기는 별도 하위 디렉터리에서 실행됩니다.
   - 예: `evaluation/b_chunk600_full_core/run.log`
   - `--max-parallel N`으로 동시 실행 개수를 제한할 수 있습니다.
-  - 최신 전체 재평가 예시는 `evaluation/parallel_b_fieldcov/b_chunk{600,800,1000,1200}_full_core`에 남아 있습니다.
+  - 최신 전체 재평가 예시는 `evaluation/b_chunk{600,800,1000,1200}_full_core`에 저장됩니다.
 
 ## Gate 리포트
 - 기본 Gate 임계값은 코드 내 `DEFAULT_CORE_GATE_THRESHOLDS`를 사용합니다.
