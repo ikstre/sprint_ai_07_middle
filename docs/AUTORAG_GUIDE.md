@@ -286,6 +286,29 @@ autorag extract_best_config \
   --output_path evaluation/autorag_benchmark_csv/best_config.yaml
 ```
 
+### 최신 A안 AutoRAG 재실행 요약 (`2026-04-21`)
+
+| 구분 | 경로 | 완료 시각 | best |
+|------|------|-----------|------|
+| 메인 trial | `evaluation/autorag_benchmark_csv/0` | 2026-04-21 08:09 KST | generator: Gemma3 LoRA (`best_104`) |
+| Gemma 확장 trial | `evaluation/autorag_benchmark_csv_gemma/0` | 2026-04-21 12:34 KST | generator: Gemma4 LoRA (`best_0`) |
+
+| node | best module | 핵심 파라미터 |
+|------|-------------|---------------|
+| lexical_retrieval | `BM25` | `tokenizer=ko_okt`, `top_k=1` |
+| semantic_retrieval | `VectorDB` | `vectordb=local_bge`, `top_k=1` |
+| hybrid_retrieval | `HybridRRF` | `top_k=8`, `weight=4.0` |
+| prompt_maker | `Fstring` | RFP 전용 지시문 |
+| generator (main) | `models/finetuned/gemma3/final` | `max_tokens=512`, `temperature=0.9`, `top_k=64`, `top_p=0.9` |
+| generator (gemma ext) | `models/finetuned/gemma4/final` | `max_tokens=256`, `temperature=0.9`, `top_k=64`, `top_p=0.9`, `max_model_len=8192` |
+
+| generator pool | 조합 수 | 최고 meteor |
+|----------------|-------:|------------:|
+| 메인 trial summary | 132 | 0.3080 수준 |
+| Gemma4 확장 trial summary | 12 | 0.2930 |
+
+> 메인 trial `generator/summary.csv`는 병합 이후 132개 조합을 포함하며, Gemma4 확장 trial의 개별 실험 12개는 별도 경로에도 보존됩니다.
+
 ## 5) 배포
 
 - AutoRAG API
